@@ -1,0 +1,23 @@
+[package]
+name = "recount"
+version = "0.1.0"
+edition = "2021"
+description = "Session testimony for pact audits: join a coordination ledger to coding-agent transcripts"
+license = "MIT"
+
+# Dependency budget (docs/spec.md): serde/serde_json, clap, chrono, anyhow.
+# Anything else needs a justifying comment right here.
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# tempfile: fixture trees for the no-sessions degradation test. Justified:
+# hand-rolling mkdtemp+cleanup in every test is more code than the dep.
+tempfile = "3"
+
+[profile.release]
+debug = 1
