@@ -14,23 +14,30 @@
 //! # Release is not optional
 //!
 //! `cargo test` without `--release` is a debug build, and a debug number is not
-//! the number the spec means. Measured, same corpus, same machine: the grep
-//! ceiling reads 2.83 s in release and **35.9 s in debug** — 13x, entirely from
-//! the optimiser, nothing to do with the design. (The `at` ceiling survives
-//! both: 13 ms release, 42 ms debug.) So the asserts fire only under
+//! the number the spec means. Measured on the pre-recount-hwk.47 code, same
+//! corpus, same machine: the grep ceiling read 2.83 s in release and **35.9 s
+//! in debug** — 13x, entirely from the optimiser, nothing to do with the
+//! design. (The `at` ceiling survived both: 13 ms release, 42 ms debug.) Both
+//! release figures are lower today; the ratio is the point. So the asserts fire only under
 //! `--release`; a debug run still prints every measurement, clearly labelled,
 //! and asserts nothing. The printed block always names the profile it was taken
 //! in. Do not quote a debug number as if it settled anything.
 //!
 //! # Result, at the time of writing
 //!
-//! Ceiling 1 is met with room to spare (~15 ms against 100 ms). **Ceiling 2 is
-//! missed**: ~2.8 s against 2 s, and the assert fires. That is the finding, not
-//! a broken test — `cmd::grep::search` parses the corpus twice (`discover_all`,
-//! then the `connector.read` loop) and then runs a per-character
-//! case-insensitive scan over every turn. The printed block decomposes it. The
-//! assert stays because a bench that reports a miss as a pass is worth nothing;
-//! the spec's number is the spec's number until the spec says otherwise.
+//! **Both ceilings are met.** Ceiling 1 with room to spare (15-65 ms against
+//! 100 ms; the margin moves with machine load, the verdict does not).
+//! Ceiling 2 at ~1.0-1.2 s against 2 s.
+//!
+//! Ceiling 2 was missed when this file was written — ~2.8 s, and the assert
+//! fired. That was reported as a finding rather than softened, and
+//! recount-hwk.47 then fixed it: an ASCII fast path in `cmd::grep::eq_ci`
+//! (~1.75 s of the 2.8 s, see that module's doc) and dropping a whole
+//! discovery parse the `generic_jsonl` fallback was doing for nothing
+//! (~230 ms, see `connector::discover_all`). The asserts never moved. A bench
+//! that reports a miss as a pass is worth nothing, and a ceiling that is
+//! lowered to fit the code is not a ceiling; the spec's number is the spec's
+//! number until the spec says otherwise, and the code came to it.
 //!
 //! # What the printed block is for
 //!
@@ -89,6 +96,11 @@ use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 /// transcript scans in 2.32 s where 193 MB of this scans in 2.83 s, because a
 /// real file spends much of its size on records and blocks that never become
 /// searchable turn text. Read the synthetic number as the pessimistic one.
+///
+/// (Those four figures are pre-recount-hwk.47 and all of them are lower today.
+/// They are kept because what they establish is the *ratios* — record size
+/// barely matters, a real byte is cheaper than a synthetic one — and the
+/// calibration they justify has not changed.)
 const SESSIONS: usize = 500;
 const TURNS_PER_SESSION: usize = 40;
 const BODY_BYTES: usize = 10_000;
@@ -198,11 +210,13 @@ fn spec_ceilings_on_a_synthetic_corpus() {
         "    {}  `at`'s explaining path above — one discovery parse, no scan, no identity work.",
         ms(explaining.1.took)
     );
-    println!("    `grep` parses the corpus TWICE (once in `cmd::grep::search`'s `discover_all`,");
-    println!("    once in the `connector.read` loop) and then runs `find_ci` over every turn,");
-    println!("    where `eq_ci` builds a `char::to_lowercase()` iterator per haystack character.");
-    println!("    Neither half is a manifest-shaped problem: a metadata sidecar could remove at");
-    println!("    most the first parse.");
+    println!("    `grep` still parses the corpus TWICE (once in `cmd::grep::search`'s");
+    println!("    `discover_all`, once in the `connector.read` loop) and then runs `find_ci`");
+    println!("    over every turn. The scan is no longer the bulk of it: `eq_ci` answers an");
+    println!("    ASCII pair without building a `char::to_lowercase()` iterator (recount-hwk.47).");
+    println!("    The second parse is what is left to take, worth ~540 ms, and taking it needs a");
+    println!("    `Connector` trait change. Neither half is a manifest-shaped problem: a metadata");
+    println!("    sidecar could remove at most the first parse.");
     println!();
 
     // Correctness first: a fast wrong answer is not a measurement.
