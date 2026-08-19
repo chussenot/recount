@@ -1,0 +1,107 @@
+[
+  {
+    "id": "recount-1cw.2",
+    "wave": 0,
+    "files": [
+      "src/pact_events.rs"
+    ],
+    "depends_on": []
+  },
+  {
+    "id": "recount-1cw.3",
+    "wave": 0,
+    "files": [
+      "src/model.rs"
+    ],
+    "depends_on": []
+  },
+  {
+    "id": "recount-1cw.4",
+    "wave": 0,
+    "files": [
+      "src/connector/claude_code.rs"
+    ],
+    "depends_on": []
+  },
+  {
+    "id": "recount-1cw.5",
+    "wave": 1,
+    "files": [
+      "src/join.rs"
+    ],
+    "depends_on": [
+      "recount-1cw.2",
+      "recount-1cw.3",
+      "recount-1cw.4"
+    ]
+  },
+  {
+    "id": "recount-1cw.6",
+    "wave": 2,
+    "files": [
+      "src/cmd/at.rs"
+    ],
+    "depends_on": [
+      "recount-1cw.5"
+    ]
+  },
+  {
+    "id": "recount-1cw.7",
+    "wave": 2,
+    "files": [
+      "src/cmd/explain.rs"
+    ],
+    "depends_on": [
+      "recount-1cw.5"
+    ]
+  },
+  {
+    "id": "recount-1cw.8",
+    "wave": 2,
+    "files": [
+      "src/cmd/sessions.rs"
+    ],
+    "depends_on": [
+      "recount-1cw.5"
+    ]
+  },
+  {
+    "id": "recount-1cw.9",
+    "wave": 3,
+    "files": [
+      "src/cmd/testify.rs",
+      "src/cli.rs",
+      "src/cmd/mod.rs",
+      "src/main.rs",
+      "docs/cli.md"
+    ],
+    "depends_on": [
+      "recount-1cw.6",
+      "recount-1cw.7"
+    ]
+  },
+  {
+    "id": "recount-1cw.10",
+    "wave": 4,
+    "files": [
+      "tests/keyed.rs",
+      "tests/fixtures2"
+    ],
+    "depends_on": [
+      "recount-1cw.9",
+      "recount-1cw.8"
+    ]
+  },
+  {
+    "id": "recount-1cw.11",
+    "wave": 2,
+    "files": [
+      "docs/join.md",
+      "docs/connectors.md"
+    ],
+    "depends_on": [
+      "recount-1cw.5",
+      "recount-1cw.4"
+    ]
+  }
+]
