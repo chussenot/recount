@@ -302,7 +302,8 @@
     "acceptance": "Carries the spec's refusals section with its intent intact — no TUI, no daemon, no network, no embeddings, no fuzzy search, one connector family, and NO PERSISTENCE with the reason \"recount owns no store that can drift from sources it does not own\". Credits cass (Dicklesworthstone/coding_agent_session_search) as the product-scale proof of the idea recount takes 3% of. Records the sidecar-manifest deferral with its exact trigger — \"iff real windowed queries exceed ~2s on a real corpus — never a content index, never a database\" — and the bench numbers actually measured. Links the worked example.",
     "title": "README: the refusals are the feature",
     "files": [
-      "README.md"
+      "README.md",
+      "tests/bench.rs"
     ],
     "deps": [
       "worked",

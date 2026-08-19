@@ -241,7 +241,8 @@
     "id": "recount-hwk.43",
     "wave": 8,
     "files": [
-      "README.md"
+      "README.md",
+      "tests/bench.rs"
     ],
     "depends_on": [
       "recount-hwk.42",
