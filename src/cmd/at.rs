@@ -102,7 +102,7 @@ use crate::cli::AtArgs;
 use crate::cmd::{EXIT_NO_MATCH, EXIT_OK};
 use crate::connector::{self, Connector};
 use crate::join::{self, Match, Query, CONFIDENT};
-use crate::model::{Confidence, Evidence, SessionMeta, Signal, TimeWindow, Turn};
+use crate::model::{Evidence, SessionMeta, Signal, Tier, TimeWindow, Turn};
 use crate::worktree::{self, Worktree};
 
 /// Bumped only when a field leaves or changes meaning, like every other
@@ -168,6 +168,10 @@ fn resolve(args: &AtArgs, invoked_from: Option<&str>, bead: Option<&str>) -> Res
         window: args.window,
         invoked_from,
         bead,
+        // recount-1cw.6 plumbs these through from the event; until then `at`
+        // has no flag that can name a transcript, so every answer is inferred.
+        harness_session: None,
+        harness_subagent: None,
     };
     Ok(decide(
         &query,
@@ -273,7 +277,11 @@ enum Outcome {
 #[derive(Debug, Clone, Serialize)]
 struct Best {
     session: SessionMeta,
-    confidence: Confidence,
+    /// Flattened to `{"tier": …, "confidence": …}`: `confidence` keeps its
+    /// meaning and its number for a topological answer, and is an explicit
+    /// `null` for a keyed one, which has no position on the ladder.
+    #[serde(flatten)]
+    tier: Tier,
     /// Never empty — [`join::Match`] cannot be built without it.
     evidence: Vec<Evidence>,
     /// `confidence >= CONFIDENT`. Duplicated from the comparison so a reader of
@@ -334,7 +342,7 @@ fn answer(
     let window = TimeWindow::around(query.at, query.window);
     let (outcome, best, refusal) = match join::resolve(query, worktrees, sessions, turns) {
         Ok(m) => {
-            let confident = m.confidence.value() >= CONFIDENT;
+            let confident = m.tier.clears(CONFIDENT);
             (
                 if confident {
                     Outcome::Match
@@ -391,7 +399,7 @@ fn best(
     };
     Best {
         session: m.session,
-        confidence: m.confidence,
+        tier: m.tier,
         evidence: m.evidence,
         confident,
         transcript,
@@ -466,7 +474,7 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
         writeln!(
             w,
             "    confidence {} · threshold {:.2} · {}",
-            b.confidence,
+            b.tier,
             r.threshold,
             if b.confident {
                 "CONFIDENT"
@@ -651,7 +659,16 @@ mod tests {
             window,
             invoked_from: None,
             bead: None,
+            harness_session: None,
+            harness_subagent: None,
         }
+    }
+
+    /// The score behind a topological answer. Panics on a keyed one, which
+    /// is the assertion: `at` cannot produce one until recount-1cw.6 gives it
+    /// the fields.
+    fn score(b: &Best) -> f64 {
+        b.tier.confidence().expect("a topological answer").value()
     }
 
     fn run_join(q: &Query, sessions: &[SessionMeta], turns: Vec<Turn>) -> Report {
@@ -697,11 +714,7 @@ mod tests {
         let b = r.best.as_ref().unwrap();
         assert!(b.confident);
         // 0.95: topology A, discriminating, plus the mention.
-        assert!(
-            (b.confidence.value() - 0.95).abs() < 1e-9,
-            "{}",
-            b.confidence
-        );
+        assert!((score(b) - 0.95).abs() < 1e-9, "{}", b.tier);
         assert!(!b.evidence.is_empty());
         // The window filters the transcript: the 11:00 turn is outside it.
         assert_eq!(b.transcript.len(), 1, "{:?}", b.transcript);
@@ -737,11 +750,7 @@ mod tests {
         assert_eq!(r.exit_code(), EXIT_NO_MATCH);
         let b = r.best.as_ref().unwrap();
         assert!(!b.confident);
-        assert!(
-            (b.confidence.value() - 0.40).abs() < 1e-9,
-            "{}",
-            b.confidence
-        );
+        assert!((score(b) - 0.40).abs() < 1e-9, "{}", b.tier);
         assert!(b.transcript.is_empty(), "the transcript is withheld");
         assert!(r.refusal.is_none(), "a low score is not a Refusal");
 
@@ -1022,7 +1031,7 @@ mod tests {
         let b = hit.best.as_ref().unwrap();
         // Topology unnamed — no worktree is called `cmdat` — plus overlap plus
         // the mention the transcript makes: 0.2 + 0.2 + 0.25.
-        assert_eq!(b.confidence.value(), 0.65);
+        assert_eq!(score(b), 0.65);
         // Only the two turns inside ±5m; the 11:00 one is out.
         assert_eq!(b.transcript.len(), 2, "{:?}", b.transcript);
         let text = text_of(&hit);

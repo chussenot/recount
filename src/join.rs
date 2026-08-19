@@ -4,6 +4,26 @@
 //! This is the whole point of the tool, so its rules are written down rather
 //! than left in the scoring arithmetic.
 //!
+//! # Two tiers, and only one of them is scored
+//!
+//! pact 0.11.0 stamps `harness_subagent` on the events it writes, and an event
+//! carrying one NAMES its transcript. Resolving it is a path join and one
+//! `is_file()` — no candidate set, no score, no tie to break — so it is not a
+//! fifth rung on the ladder below but a tier ABOVE the whole ladder:
+//! [`Tier::Keyed`], evidenced by the filename that proved it. Everything from
+//! here to [`CONFIDENT`] is the tier BELOW: calibrated inference, unchanged by
+//! this, and reached only by an event with no `harness_subagent`. Neither tier
+//! is tuned in terms of the other — one is an identity, the other is a guess.
+//!
+//! Which tier answered is on every result, and when it was the lower one the
+//! [`Signal::Keyed`] evidence line says why the higher one did not apply. The
+//! two ways that happens are different sentences with different next steps: **no
+//! `harness_subagent` on the event** means it was not written by a subagent,
+//! which is normal and where the ladder answers; **a keyed id whose file is
+//! absent** means the event named a transcript that is not there, which is a
+//! refusal ([`Refusal::NoKeyedTranscript`]) and never a quiet demotion to
+//! guessing.
+//!
 //! # The key is topological, not textual
 //!
 //! `invoked_from -> worktree path -> session cwd`. A pact event says which
@@ -52,17 +72,18 @@
 //!
 //! # Never a bare answer
 //!
-//! [`Match`] cannot be built without a `Confidence` and a non-empty
-//! `Vec<Evidence>`, and [`Refusal`] cannot be returned without saying which of
-//! the two reasons applies. There is no third outcome and no code path that
-//! returns a session with no explanation attached.
+//! [`Match`] cannot be built without a [`Tier`] and a non-empty
+//! `Vec<Evidence>`, and [`Refusal`] cannot be returned without saying which
+//! reason applies. There is no third outcome and no code path that returns a
+//! session with no explanation attached.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{Confidence, Evidence, SessionMeta, Signal, TimeWindow, Turn};
+use crate::connector::claude_code::{self, Keyed};
+use crate::model::{Confidence, Evidence, SessionMeta, Signal, Tier, TimeWindow, Turn};
 use crate::worktree::{for_cwd, Worktree};
 
 /// What we are trying to place in time and space.
@@ -84,49 +105,85 @@ pub struct Query<'a> {
     pub invoked_from: Option<&'a str>,
     /// A bead id to look for in transcripts, for the tiebreaker.
     pub bead: Option<&'a str>,
+    /// The event's `harness_session`: the Claude Code session uuid, which is
+    /// the directory a subagent transcript lives under. Half of the exact key.
+    pub harness_session: Option<&'a str>,
+    /// The event's `harness_subagent`: the id of the transcript the event was
+    /// written from. **This field alone gates the keyed tier** — see
+    /// [`resolve`]. Its absence is a normal state, not a degraded one.
+    pub harness_subagent: Option<&'a str>,
 }
 
-/// A session, with why we believe it.
+/// A session, with which tier answered and why we believe it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Match {
     pub session: SessionMeta,
-    pub confidence: Confidence,
+    /// `keyed`, or `topological` with the score. Flattened, so the wire shape
+    /// is the two fields `{"tier": …, "confidence": …}` documented on
+    /// [`Tier`] — a keyed answer writes an explicit `null` where a number used
+    /// to be, rather than a number nobody computed.
+    #[serde(flatten)]
+    pub tier: Tier,
     /// Never empty. See the module doc.
     pub evidence: Vec<Evidence>,
 }
 
-/// The two reasons `at` is allowed to give for exit 1. Exactly two, because
-/// the spec names exactly two, and an audit reader needs to know which
-/// question to ask next: "no cwd match" means look at the topology, "no
-/// overlap" means look at the clock.
+/// The reasons `at` is allowed to give for exit 1. One per question the reader
+/// has to ask next, which is why they are not one variant: "no cwd match" means
+/// look at the topology, "no overlap" means look at the clock, "no keyed
+/// transcript" means look at the transcript store — or at which machine you are
+/// standing on.
+///
+/// The spec named the first two. The third arrived with the keyed tier and
+/// belongs to it exclusively — it is reachable only for an event carrying a
+/// `harness_subagent`. Collapsing it into [`Refusal::NoCwdMatch`] would send an
+/// auditor to look at cwds when no cwd was ever consulted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+// A list of refusals is a list of negatives, so of course they share a prefix.
+// The alternative the lint suggests is renaming the spec's own two words to
+// suit a naming heuristic.
+#[expect(
+    clippy::enum_variant_names,
+    reason = "every refusal is a `no <thing>`; that is the domain, not a naming slip"
+)]
 pub enum Refusal {
     /// No session's cwd resolved into the repo or the named worktree — or the
     /// worktree it named is gone from disk.
     NoCwdMatch { detail: String },
     /// Sessions matched topologically, but none has a turn inside the window.
     NoOverlap { detail: String },
+    /// The event named its transcript and the transcript is not there: absent
+    /// from disk, or the id is not an id. Keyed events only.
+    NoKeyedTranscript { detail: String },
 }
 
 impl Refusal {
-    /// The spec's two words, for the digest and for tests that pin them.
+    /// The words the digest prints, and that tests pin.
     pub fn reason(&self) -> &'static str {
         match self {
             Refusal::NoCwdMatch { .. } => "no cwd match",
             Refusal::NoOverlap { .. } => "no overlap",
+            Refusal::NoKeyedTranscript { .. } => "no keyed transcript",
         }
     }
 
     pub fn detail(&self) -> &str {
         match self {
-            Refusal::NoCwdMatch { detail } | Refusal::NoOverlap { detail } => detail,
+            Refusal::NoCwdMatch { detail }
+            | Refusal::NoOverlap { detail }
+            | Refusal::NoKeyedTranscript { detail } => detail,
         }
     }
 }
 
 /// Below this, `at` refuses rather than answering. A single named constant
 /// because "no-confident-match" in the spec has to mean one thing everywhere.
+///
+/// Apply it with [`Tier::clears`], never by reaching for a number: a keyed
+/// answer has no score, clears every bar, and a caller that re-derives the
+/// comparison drops an identity for failing a test it was never on. The keyed
+/// tier moved neither this constant nor the four rungs beneath it.
 pub const CONFIDENT: f64 = 0.5;
 
 /// What each signal is worth. Four fixed numbers, not a weight table: the spec
@@ -211,6 +268,153 @@ struct Candidate<'a> {
     exact: bool,
 }
 
+/// The two tiers, in order: keyed if the event named its transcript, the
+/// scored ladder if it did not.
+///
+/// **The gate is `harness_subagent` and nothing else.** Not `harness.is_some()`
+/// and not `harness_session.is_some()`: measured on this repo's own ledger, five
+/// rows carry `harness`, `model`, `harness_session` and `branch` with no subagent
+/// id — `kind=context` rows written by a top-level agent, which has a session and
+/// is not a subagent of anything, and every orchestrator row looks like that.
+/// Proxying on those fields would send the fleet's top-level events into a keyed
+/// lookup that cannot succeed, turning a normal state into a refusal.
+///
+/// `turns` reads a session's transcript for the mention tiebreaker. It is a
+/// callback so the join does not decide which connector owns a path and so
+/// transcripts are read lazily — most candidates are eliminated by topology or
+/// overlap without ever being opened. The keyed tier never calls it: nothing in
+/// a transcript could raise an identity.
+pub fn resolve(
+    query: &Query,
+    worktrees: &[Worktree],
+    sessions: &[SessionMeta],
+    turns: &dyn Fn(&Path) -> Vec<Turn>,
+) -> Result<Match, Refusal> {
+    match query.harness_subagent {
+        Some(subagent) => keyed(query, subagent, worktrees, sessions),
+        None => topological(query, worktrees, sessions, turns),
+    }
+}
+
+/// The keyed tier: the event names the transcript, so resolution is a path
+/// join and one `stat` per session directory this repo has.
+///
+/// Not a search. [`claude_code::keyed`] validates the two ids as opaque
+/// `[A-Za-z0-9-]` tokens (so a hostile ledger cannot walk out of the project
+/// directory), joins the path and stats it. Several directories are tried
+/// because a repo and its worktrees encode to different ones and the event does
+/// not say which — a handful of stats, not a walk, first hit wins.
+///
+/// **The ceiling, and why it is not a hole.** 371 of 634 subagent transcripts on
+/// the machine this was measured on live one level down, in
+/// `subagents/workflows/wf_<id>/`, which this tier does not look in. It does not
+/// have to: no pact event carries a `wf_` id, because the only recipe by which
+/// an agent learns its own id (`docs/format-notes.md` §10.3) globs the flat
+/// directory, so any id that reached an event came from a flat file by
+/// construction. Those 371 belong to the topological ladder and always did. Do
+/// not "fix" this by scanning `workflows/`: a scan is what this tier exists not
+/// to do, and it would hand the tie-break bug an identity it cannot touch.
+fn keyed(
+    query: &Query,
+    subagent: &str,
+    worktrees: &[Worktree],
+    sessions: &[SessionMeta],
+) -> Result<Match, Refusal> {
+    // Half a key is a malformed identity, not a missing file: the path is
+    // <project dir>/<harness_session>/subagents/agent-<harness_subagent>.jsonl,
+    // so an absent session id names nothing, and `claude_code::keyed` already
+    // rejects an empty token. One code path says it once.
+    let session = query.harness_session.unwrap_or_default();
+
+    let mut looked: Vec<PathBuf> = Vec::new();
+    for w in worktrees {
+        match claude_code::keyed(&w.session_dir, session, Some(subagent)) {
+            Keyed::Found(path) => return keyed_match(path, session, subagent, sessions),
+            Keyed::Absent(path) => looked.push(path),
+            // Decided by the ids alone, so the first directory settles it for
+            // every directory: this is a bad id, not a missing file, and
+            // nothing was stat'd.
+            Keyed::Malformed(why) => {
+                return Err(Refusal::NoKeyedTranscript {
+                    detail: format!(
+                        "the event's keyed identity is not usable as one: {why}. No path was \
+                         joined and nothing was stat'd, so this is not a transcript that has \
+                         gone missing — it is a defect in the event that names it, and the \
+                         thing to look at is the ledger, not the disk"
+                    ),
+                })
+            }
+        }
+    }
+
+    Err(Refusal::NoKeyedTranscript {
+        detail: format!(
+            "the event names transcript agent-{subagent}.jsonl under harness_session \
+             {session}, and it is not on disk: looked at {}. Two things do this and they are \
+             not the same news. Either the transcript was PRUNED — Claude Code keeps 30 days, \
+             and a fleet that tidies its worktrees as it goes takes their encoded session \
+             directories with them — in which case look elsewhere on this machine and at your \
+             backups. Or this LEDGER CAME FROM ANOTHER MACHINE, in which case the transcript \
+             was never here, no amount of looking will find it, and this question cannot be \
+             answered on this host at all",
+            paths(&looked)
+        ),
+    })
+}
+
+/// The transcript is on disk. Turn it into an answer, or say why the sessions
+/// the join was offered do not contain it.
+fn keyed_match(
+    path: PathBuf,
+    session: &str,
+    subagent: &str,
+    sessions: &[SessionMeta],
+) -> Result<Match, Refusal> {
+    // Practically unreachable: a transcript being written when the event fired
+    // has an mtime at or after it, so the prune cannot drop it (`crate::prune`).
+    // Not impossible though, and an identity silently downgraded to a guess is
+    // the one outcome this tier exists to prevent.
+    let Some(meta) = sessions.iter().find(|s| s.path == path) else {
+        return Err(Refusal::NoKeyedTranscript {
+            detail: format!(
+                "the event names agent-{subagent}.jsonl, which IS on disk at {}, but it is \
+                 not among the {} \
+                 session(s) the join was offered — no connector read it. The file is there; \
+                 what is missing is a reader for it, so look at the file, not for it",
+                path.display(),
+                sessions.len()
+            ),
+        });
+    };
+    Ok(Match {
+        session: meta.clone(),
+        tier: Tier::Keyed,
+        evidence: vec![Evidence::new(
+            Signal::Keyed,
+            format!(
+                "the event named its own transcript: harness_subagent `{subagent}` under \
+                 harness_session `{session}` is {}, found at {} by one path join and one \
+                 stat. No candidate set, no score, no tie to break — this is an identity, and \
+                 the topological ladder was not consulted",
+                file_name(meta),
+                path.display()
+            ),
+        )],
+    })
+}
+
+/// Why the keyed tier did not answer, on every answer the ladder gives.
+///
+/// One sentence, because there is exactly one way to get here: an event with a
+/// `harness_subagent` either resolves keyed or refuses, so reaching the ladder
+/// means the field was absent. Distinguishing that from "keyed id present, file
+/// absent" is the point — different questions, and this one is not a problem.
+const NO_KEY: &str =
+    "no `harness_subagent` on this event, so nothing named a transcript: it was not written by \
+     a subagent. A top-level agent has a harness_session and is not a subagent of anything, and \
+     every orchestrator row in this repo's ledger looks exactly like this — a normal state, not \
+     a degraded one. The answer below is INFERRED by the topological ladder, not keyed";
+
 /// Score every candidate and return the best one, or the reason there is none.
 ///
 /// The returned [`Match`] is the best candidate, not necessarily a confident
@@ -218,11 +422,9 @@ struct Candidate<'a> {
 /// a low-confidence match still has to be *printed* — its evidence is what
 /// tells the auditor whether to go and look at the clock or at the topology.
 ///
-/// `turns` reads a session's transcript for the mention tiebreaker. It is a
-/// callback so the join does not decide which connector owns a path and so
-/// transcripts are read lazily — most candidates are eliminated by topology or
-/// overlap without ever being opened.
-pub fn resolve(
+/// Unchanged by the keyed tier above it: the four rungs, their arithmetic and
+/// [`CONFIDENT`] are exactly what they were.
+fn topological(
     query: &Query,
     worktrees: &[Worktree],
     sessions: &[SessionMeta],
@@ -309,7 +511,13 @@ pub fn resolve(
     };
 
     // 5. Score. Ties keep the first candidate offered, so the same inputs
-    //    always give the same answer.
+    //    always give the same answer — and recount-gwx is still open on
+    //    exactly that: candidates arrive in path order, which puts a
+    //    subagent transcript ahead of its parent, so an orchestrator event
+    //    systematically loses its own session. The keyed tier does NOT fix
+    //    this. It cannot even reach it: a keyed event has one candidate and
+    //    no tie, while every event gwx was measured on is an orchestrator row
+    //    with no harness_subagent, which arrives here unchanged.
     let mut best: Option<(f64, Match)> = None;
     for c in &overlapping {
         let (score, scored) = score(query, c, topology, &window, turns);
@@ -449,11 +657,16 @@ fn score(
         None => {}
     }
 
+    // Last, and on every scored answer: which tier this is and why it is not
+    // the higher one. A reader who cannot tell an inferred answer from one that
+    // had an exact key available is back to reading a bare number.
+    evidence.push(Evidence::new(Signal::Keyed, NO_KEY));
+
     (
         total,
         Match {
             session: c.session.clone(),
-            confidence: Confidence::new(total),
+            tier: Tier::Topological(Confidence::new(total)),
             evidence,
         },
     )
@@ -536,6 +749,18 @@ fn needles(query: &Query) -> String {
     }
 }
 
+/// The paths the keyed lookup stat'd, for the refusal that must name them.
+fn paths(looked: &[PathBuf]) -> String {
+    match looked.is_empty() {
+        true => "nowhere: this repo has no worktree to encode a session directory from".into(),
+        false => looked
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
 fn names(worktrees: &[Worktree]) -> String {
     if worktrees.is_empty() {
         return "none".to_string();
@@ -577,11 +802,17 @@ fn fmt_window(w: &TimeWindow) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::fs;
     use std::path::PathBuf;
+
+    use tempfile::TempDir;
 
     use crate::model::{parse_ts, Role};
 
     const REPO: &str = "/r";
+    /// A well-formed pair of harness ids, in the shapes pact 0.11.0 stamps.
+    const SESSION: &str = "11111111-2222-3333-4444-555555555555";
+    const SUB: &str = "aaadf026f08b25971";
 
     fn ts(s: &str) -> DateTime<Utc> {
         parse_ts(s).unwrap()
@@ -623,6 +854,8 @@ mod tests {
             window: Duration::minutes(5),
             invoked_from,
             bead: Some("recount-hwk.31"),
+            harness_session: None,
+            harness_subagent: None,
         }
     }
 
@@ -650,6 +883,16 @@ mod tests {
 
     fn none(_: &Path) -> Vec<Turn> {
         Vec::new()
+    }
+
+    /// The score behind a topological answer, for the tests that pin the
+    /// arithmetic. Panics on a keyed one — which is the point: there is no
+    /// number to compare a keyed answer against.
+    fn score(m: &Match) -> f64 {
+        m.tier
+            .confidence()
+            .expect("a topological answer carries a score")
+            .value()
     }
 
     fn signals(m: &Match) -> Vec<Signal> {
@@ -685,9 +928,14 @@ mod tests {
 
         let m = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
         assert_eq!(m.session.path, sessions[0].path);
-        assert_eq!(m.confidence.value(), TOPOLOGY_DISCRIMINATING + OVERLAP);
-        assert!(m.confidence.value() >= CONFIDENT);
-        assert_eq!(signals(&m), [Signal::Topology, Signal::TimeOverlap]);
+        assert_eq!(score(&m), TOPOLOGY_DISCRIMINATING + OVERLAP);
+        assert!(score(&m) >= CONFIDENT);
+        assert_eq!(
+            signals(&m),
+            [Signal::Topology, Signal::TimeOverlap, Signal::Keyed]
+        );
+        // Even the cleanest topological answer says it is not the keyed one.
+        assert!(m.evidence[2].detail.starts_with("no `harness_subagent`"));
         assert!(m.evidence[0]
             .detail
             .contains("topology A (process-per-agent)"));
@@ -727,11 +975,11 @@ mod tests {
         // choose. The best score must be below the bar, so `at` refuses.
         let mute = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
         assert!(
-            mute.confidence.value() < CONFIDENT,
+            score(&mute) < CONFIDENT,
             "topology B answered {} on topology alone — the arkanoid-v1 failure",
-            mute.confidence
+            mute.tier
         );
-        assert_eq!(mute.confidence.value(), TOPOLOGY_FILTER + OVERLAP);
+        assert_eq!(score(&mute), TOPOLOGY_FILTER + OVERLAP);
         assert!(mute.evidence[0]
             .detail
             .contains("topology B (subagent-per-agent)"));
@@ -750,10 +998,10 @@ mod tests {
         ]);
         let m = resolve(&query("join", Some("join")), &wts, &sessions, &told).unwrap();
         assert_eq!(m.session.path, sessions[1].path);
-        assert_eq!(m.confidence.value(), TOPOLOGY_FILTER + OVERLAP + MENTION);
-        assert!(m.confidence.value() >= CONFIDENT);
+        assert_eq!(score(&m), TOPOLOGY_FILTER + OVERLAP + MENTION);
+        assert!(score(&m) >= CONFIDENT);
         assert!(
-            m.confidence.value() < TOPOLOGY_DISCRIMINATING + OVERLAP,
+            score(&m) < TOPOLOGY_DISCRIMINATING + OVERLAP,
             "a mention under topology B must not read like a topological match"
         );
         assert!(m.evidence[0]
@@ -784,7 +1032,7 @@ mod tests {
         ];
 
         let m = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
-        assert!(m.confidence.value() < CONFIDENT, "{}", m.confidence);
+        assert!(score(&m) < CONFIDENT, "{}", m.tier);
         assert!(m.evidence[0].detail.contains("ambiguous"));
     }
 
@@ -916,12 +1164,12 @@ mod tests {
         )];
 
         let m = resolve(&query("join", None), &wts, &sessions, &none).unwrap();
-        assert_eq!(m.confidence.value(), TOPOLOGY_DISCRIMINATING + OVERLAP);
+        assert_eq!(score(&m), TOPOLOGY_DISCRIMINATING + OVERLAP);
 
         // And with no worktree of that name, the chain is repo-wide: it can
         // still filter, never discriminate.
         let m = resolve(&query("orchestrator", None), &wts, &sessions, &none).unwrap();
-        assert!(m.confidence.value() < CONFIDENT);
+        assert!(score(&m) < CONFIDENT);
         assert!(m.evidence[0].detail.contains("topology unnamed"));
     }
 
@@ -1026,7 +1274,7 @@ mod tests {
                 match resolve(&q, &wts, &all[..n], &said) {
                     Ok(m) => {
                         assert!(!m.evidence.is_empty(), "a match with no evidence");
-                        assert!((0.0..=1.0).contains(&m.confidence.value()));
+                        assert!((0.0..=1.0).contains(&score(&m)));
                         assert!(
                             m.evidence.iter().any(|e| e.signal == Signal::Topology),
                             "no topology evidence"
@@ -1054,5 +1302,240 @@ mod tests {
         assert!(s.contains("join") && !s.contains('\n'));
         assert!(s.chars().count() < 100, "{s}");
         assert_eq!(snippet("just join", 5, 4), "just join");
+    }
+
+    /// A fleet whose encoded session directories are real directories under a
+    /// tempdir. The keyed tier stats real files, so its tests hand it real
+    /// files rather than a mock of `is_file`.
+    fn keyed_tree() -> (TempDir, Vec<Worktree>) {
+        let td = tempfile::tempdir().unwrap();
+        let mut wts = fleet(&["join"]);
+        for w in &mut wts {
+            w.session_dir = td.path().join(format!("-r-{}", w.name));
+        }
+        (td, wts)
+    }
+
+    /// Write `<session_dir>/<SESSION>/subagents/agent-<sub>.jsonl`.
+    fn keyed_file(w: &Worktree, sub: &str) -> PathBuf {
+        let p = w
+            .session_dir
+            .join(SESSION)
+            .join("subagents")
+            .join(format!("agent-{sub}.jsonl"));
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, "").unwrap();
+        p
+    }
+
+    fn session_at(path: &Path, cwd: Option<&str>) -> SessionMeta {
+        SessionMeta {
+            path: path.to_path_buf(),
+            ..session("keyed", cwd, "2026-08-19T07:00:00Z", "2026-08-19T08:00:00Z")
+        }
+    }
+
+    /// [`query`], plus the 0.11.0 chain.
+    fn keyed_query<'a>(agent: &'a str, sub: Option<&'a str>) -> Query<'a> {
+        Query {
+            harness_session: Some(SESSION),
+            harness_subagent: sub,
+            ..query(agent, Some("join"))
+        }
+    }
+
+    /// The keyed tier, right by construction: the file the event names is the
+    /// file on disk, so the answer is an identity and there is nothing to score.
+    #[test]
+    fn a_keyed_event_is_answered_by_name_and_not_by_the_ladder() {
+        let (_td, wts) = keyed_tree();
+        // Under the SECOND worktree's directory, so the loop is doing work: the
+        // event does not say which encoded directory its session lives in.
+        let path = keyed_file(&wts[1], SUB);
+        let sessions = vec![session_at(&path, Some("/r"))];
+
+        let m = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &none).unwrap();
+        assert_eq!(m.tier, Tier::Keyed);
+        assert_eq!(m.session.path, path);
+        assert_eq!(m.tier.confidence(), None, "an identity has no score");
+        assert!(m.tier.clears(1.0), "keyed clears every bar");
+        // One signal, and it names the filename that proved it.
+        assert_eq!(signals(&m), [Signal::Keyed]);
+        assert!(
+            m.evidence[0].detail.contains(&format!("agent-{SUB}.jsonl")),
+            "{}",
+            m.evidence[0].detail
+        );
+        assert!(m.evidence[0].detail.contains(SUB));
+        assert!(m.evidence[0].detail.contains("No candidate set"));
+
+        // And it serialises as the identity, not as a number nobody computed.
+        let v: serde_json::Value = serde_json::to_value(&m).unwrap();
+        assert_eq!(v["tier"], "keyed");
+        assert!(v["confidence"].is_null());
+    }
+
+    /// The new refusal, and the two causes it must tell apart for the reader.
+    /// A keyed id whose file is absent is NOT `no cwd match`: no cwd was
+    /// consulted, and sending an auditor to look at the topology would be
+    /// sending them to the wrong question.
+    #[test]
+    fn a_keyed_id_whose_file_is_absent_is_its_own_refusal() {
+        let (_td, wts) = keyed_tree();
+        // A session that WOULD have won topologically, to prove the keyed tier
+        // refuses instead of quietly falling back to a guess.
+        let sessions = vec![session(
+            "a",
+            Some("/r/wt/join"),
+            "2026-08-19T07:00:00Z",
+            "2026-08-19T08:00:00Z",
+        )];
+
+        let err = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &none).unwrap_err();
+        assert_eq!(err.reason(), "no keyed transcript");
+        assert_ne!(err.reason(), "no cwd match");
+        let d = err.detail();
+        // It names the path it looked at, both of them.
+        assert!(d.contains(&format!("agent-{SUB}.jsonl")), "{d}");
+        assert!(d.contains("-r-main"), "{d}");
+        assert!(d.contains("-r-join"), "{d}");
+        // And the two real causes, which are different next steps: look
+        // elsewhere here, versus you cannot answer this here at all.
+        assert!(d.contains("PRUNED"), "{d}");
+        assert!(d.contains("LEDGER CAME FROM ANOTHER MACHINE"), "{d}");
+    }
+
+    /// A malformed id is a third thing: nothing was stat'd, so nothing is
+    /// missing. The sentence must send the reader to the ledger, not the disk.
+    #[test]
+    fn a_malformed_keyed_id_is_not_an_absent_file() {
+        let (_td, wts) = keyed_tree();
+
+        let err = resolve(&keyed_query("join", Some("../etc")), &wts, &[], &none).unwrap_err();
+        assert_eq!(err.reason(), "no keyed transcript");
+        let d = err.detail();
+        assert!(d.contains("harness_subagent"), "{d}");
+        assert!(d.contains("not usable as one"), "{d}");
+        assert!(d.contains("the ledger, not the disk"), "{d}");
+        // Not the absence sentence: this transcript did not go missing.
+        assert!(!d.contains("PRUNED"), "{d}");
+
+        // Half a key is the same kind of thing — an identity that is not one —
+        // and still not an absent file.
+        let half = Query {
+            harness_session: None,
+            harness_subagent: Some(SUB),
+            ..query("join", Some("join"))
+        };
+        let err = resolve(&half, &wts, &[], &none).unwrap_err();
+        assert_eq!(err.reason(), "no keyed transcript");
+        assert!(
+            err.detail().contains("harness_session is empty"),
+            "{}",
+            err.detail()
+        );
+    }
+
+    /// Wave 1's finding, pinned: the rest of the attribution chain does NOT
+    /// imply `harness_subagent`. An event with harness_session and no subagent
+    /// id was written by a top-level agent, which is normal — so the ladder
+    /// answers, and the answer says why the tier above it did not.
+    #[test]
+    fn the_chain_without_a_subagent_id_falls_through_and_says_why() {
+        let (_td, wts) = keyed_tree();
+        // The transcript the keyed tier WOULD have found, if it were gated on
+        // harness_session. It is not: this event names no subagent.
+        keyed_file(&wts[1], SUB);
+        let sessions = vec![session(
+            "a",
+            Some("/r/wt/join"),
+            "2026-08-19T07:00:00Z",
+            "2026-08-19T08:00:00Z",
+        )];
+
+        let m = resolve(&keyed_query("join", None), &wts, &sessions, &none).unwrap();
+        assert_eq!(
+            m.tier,
+            Tier::Topological(Confidence::new(TOPOLOGY_DISCRIMINATING + OVERLAP))
+        );
+        let why = &m.evidence[m.evidence.len() - 1];
+        assert_eq!(why.signal, Signal::Keyed);
+        assert!(why.detail.contains("no `harness_subagent` on this event"));
+        assert!(why.detail.contains("not written by a subagent"));
+        assert!(why.detail.contains("normal state, not"));
+        assert!(why.detail.contains("INFERRED"));
+        // The distinction that must not collapse: this is not the sentence an
+        // absent keyed file gets.
+        assert!(!why.detail.contains("PRUNED"));
+    }
+
+    /// The one that matters: the two tiers disagree, and keyed wins.
+    ///
+    /// The topological ladder is handed its best possible case — topology A,
+    /// discriminating, with a mention, which is 0.95 and the highest score this
+    /// tool can produce — and the event names a different transcript. The keyed
+    /// answer is the one that comes back, and it says why.
+    #[test]
+    fn keyed_beats_the_ladder_even_at_its_best_score() {
+        let (_td, wts) = keyed_tree();
+        let path = keyed_file(&wts[0], SUB);
+        let sessions = vec![
+            // The ladder's champion: cwd IS the named worktree, and it says the
+            // agent name and the bead id.
+            session(
+                "champion",
+                Some("/r/wt/join"),
+                "2026-08-19T07:00:00Z",
+                "2026-08-19T08:00:00Z",
+            ),
+            // The transcript the event actually names, at the repo root, saying
+            // nothing at all.
+            session_at(&path, Some("/r")),
+        ];
+        let told = transcripts(&[("champion", "PACT_AGENT=join on recount-hwk.31")]);
+
+        // What the ladder alone would have said, on the same inputs.
+        let inferred = resolve(&query("join", Some("join")), &wts, &sessions, &told).unwrap();
+        assert_eq!(inferred.session.path, sessions[0].path);
+        assert_eq!(
+            score(&inferred),
+            TOPOLOGY_DISCRIMINATING + OVERLAP + MENTION
+        );
+
+        // What it says once the event names its transcript.
+        let keyed = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &told).unwrap();
+        assert_eq!(keyed.session.path, path);
+        assert_eq!(keyed.tier, Tier::Keyed);
+        assert!(
+            keyed.tier > inferred.tier,
+            "the ladder outranked an identity: {} vs {}",
+            keyed.tier,
+            inferred.tier
+        );
+        // The evidence says which tier answered, and the losing signals are not
+        // in it: nothing was scored, so there is nothing to report scoring.
+        assert_eq!(signals(&keyed), [Signal::Keyed]);
+        assert!(keyed.evidence[0]
+            .detail
+            .contains("the topological ladder was not consulted"));
+    }
+
+    /// The file is there and nothing read it. Practically unreachable — the
+    /// mtime prune cannot drop a transcript that was being written when the
+    /// event fired — but an identity must never be downgraded to a guess in
+    /// silence, so it has a sentence of its own.
+    #[test]
+    fn a_named_transcript_nobody_read_says_so_rather_than_guessing() {
+        let (_td, wts) = keyed_tree();
+        let path = keyed_file(&wts[0], SUB);
+
+        let err = resolve(&keyed_query("join", Some(SUB)), &wts, &[], &none).unwrap_err();
+        assert_eq!(err.reason(), "no keyed transcript");
+        assert!(err.detail().contains("IS on disk"), "{}", err.detail());
+        assert!(
+            err.detail().contains(&path.display().to_string()),
+            "{}",
+            err.detail()
+        );
     }
 }
