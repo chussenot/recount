@@ -11,6 +11,14 @@ license = "MIT"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 clap = { version = "4", features = ["derive"] }
+# clap_complete: generating the five shells' completion scripts from the same
+# clap command tree the parser uses is the whole point — a generated completion
+# cannot name a subcommand that does not exist, which is the drift a
+# hand-written one accumulates. Hand-rolling bash+zsh+fish+elvish+powershell
+# would be several hundred lines of shell that go stale on the next flag.
+# Justified against the spec's dependency budget: it is clap's own companion
+# crate, pulls in nothing beyond clap, and is not linked into any other path.
+clap_complete = "4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

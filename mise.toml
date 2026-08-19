@@ -93,8 +93,21 @@ run = [
 ]
 
 [tasks.install]
-description = "Build and install the recount binary onto PATH"
-# No feature flags to choose and no completion script to refresh: recount's clap
-# surface has five subcommands and no `completion` command, so there is nothing
-# generated to go stale. If one is ever added, this is where the refresh belongs.
-run = "cargo install --path . --force"
+description = "Build and install the recount binary onto PATH, and refresh shell completions"
+# No feature flags to choose — recount has none.
+run = [
+  "cargo install --path . --force",
+  """
+  # Refresh the generated completion scripts. They come out of the same clap
+  # command tree the parser uses, so they cannot name a command that does not
+  # exist — but a shell caches the file, so an install otherwise leaves
+  # yesterday's commands completing until someone regenerates it by hand, and
+  # nobody does. Only directories that already exist are written, so this is a
+  # no-op on a machine without them.
+  refresh() { [ -d "$1" ] && recount completion "$2" > "$1/$3" && echo "completions: $1/$3"; true; }
+  command -v recount >/dev/null || exit 0
+  refresh "${ZDOTDIR:-$HOME}/.zsh/completions" zsh _recount
+  refresh "$HOME/.local/share/bash-completion/completions" bash recount
+  refresh "$HOME/.config/fish/completions" fish recount.fish
+  """,
+]

@@ -11,6 +11,7 @@
 //! forgets to.
 
 pub mod at;
+pub mod completion;
 pub mod doctor;
 pub mod explain;
 pub mod grep;
@@ -20,12 +21,9 @@ pub mod sessions;
 pub const EXIT_OK: u8 = 0;
 /// No confident match — `at` and `explain` only — or a hard error.
 pub const EXIT_NO_MATCH: u8 = 1;
-/// The command parsed but the work behind it has not landed yet.
-pub const EXIT_UNIMPLEMENTED: u8 = 2;
 
-/// The seam's placeholder: the flags parsed, and the command says so plainly
-/// instead of panicking. Each `run` returns this until its own bead lands.
-pub fn unimplemented(command: &str) -> anyhow::Result<u8> {
-    eprintln!("recount {command}: unimplemented — flags parsed, no work done yet");
-    Ok(EXIT_UNIMPLEMENTED)
-}
+// There was a third code here, `EXIT_UNIMPLEMENTED = 2`, and an `unimplemented`
+// helper every `run` returned until its own bead landed. All of them have, so
+// both are gone: a placeholder nothing can reach is a lie about what the binary
+// can do. 2 still occurs — clap exits 2 on a usage error — which is why no
+// command returns it deliberately.

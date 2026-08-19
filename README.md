@@ -57,12 +57,14 @@ cargo build --release      # ./target/release/recount
 cargo install --path .     # or onto your PATH
 ```
 
-Dependencies: `serde`, `serde_json`, `clap`, `chrono`, `anyhow`. `tempfile` for
-tests. Nothing else, by budget.
+Dependencies: `serde`, `serde_json`, `clap`, `clap_complete`, `chrono`,
+`anyhow`. `tempfile` for tests. Nothing else, by budget.
 
-## The five commands
+## The six commands
 
-All take `--json`; the human digest is printed second.
+The spec's five all take `--json`; the human digest is printed second.
+`completion` is the sixth and the exception — see
+[the deviations](#deviations-from-the-specs-literal-text).
 
 ```
 recount sessions --repo <p> [--since --until]
@@ -71,8 +73,9 @@ recount sessions --repo <p> [--since --until]
 
 recount at --repo <p> --agent <name> --ts <rfc3339> [--window 5m]
     Which session was driving that identity at that moment, and the
-    transcript window around it. Exit 0 found, exit 1 refused — with the
-    reason, which is either `no cwd match` or `no overlap`.
+    transcript window around it. Exit 0 found, exit 1 refused — either
+    with a reason, `no cwd match` or `no overlap`, or with a candidate
+    that scored below the bar and the evidence that fell short.
 
 recount grep <needle> --repo <p> [--agent --since --until]
     Case-insensitive substring, not a regex. Prints (session, line, ts,
@@ -86,6 +89,10 @@ recount doctor [--repo <p>]
     Connector roots, session counts, parse-failure tallies, and whether a
     join is possible here at all: are there events, are the worktrees the
     ledger names still on disk.
+
+recount completion <bash|zsh|fish|elvish|powershell>
+    The completion script for your shell, on stdout alone, generated from
+    the same clap tree the parser uses. Not a `--json` command.
 ```
 
 `--since` and `--until` take RFC 3339 or a duration ago (`2h`, `1d`). Start with
@@ -231,7 +238,16 @@ below the bar, so `at` will refuse.
   degrades rather than asserts, and the notes are a snapshot to be
   re-measured — never a contract.
 
-### One deviation from the spec's literal text
+### Deviations from the spec's literal text
+
+**`recount completion <shell>` is a sixth command, and the one that does not
+take `--json`.** The spec's command list names five and says "all --json; human
+digest second". `completion` writes a shell program to stdout, so a digest
+printed beside it would be sourced as code: `--json` is accepted and ignored
+rather than refused, since the flag is global and erroring on it would turn
+something harmless into a usage error. The alternative was five checked-in
+completion scripts, which are hand-written copies of the CLI and drift from it
+the first time a flag changes.
 
 The spec writes the trait as `discover() -> Vec<SessionMeta>`. The code is
 `discover(dirs, window)`. Taken openly, because the spec's own cheapness

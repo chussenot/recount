@@ -9,11 +9,17 @@
 //! `--json` is global rather than per-command because the spec applies it to
 //! all five ("all --json"), and a global flag can be written either side of
 //! the subcommand, which is what people actually type.
+//!
+//! `completion` is the one command the spec does not name, and the one that
+//! does NOT follow the "all --json" rule — its stdout is a shell program, so
+//! `--json` is accepted and ignored. See [`crate::cmd::completion`] for why,
+//! and the README's "Deviations from the spec's literal text".
 
 use std::path::PathBuf;
 
 use chrono::{DateTime, Duration, Utc};
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 
 use crate::model::{parse_duration, parse_ts, parse_when};
 
@@ -22,7 +28,51 @@ use crate::model::{parse_duration, parse_ts, parse_when};
     name = "recount",
     version,
     about = "Session testimony for pact audits: join a coordination ledger to coding-agent transcripts",
-    long_about = None,
+    long_about = "\
+recount answers `why did this agent do that?` by joining pact's coordination \
+ledger (.pact/events.jsonl, the WHAT) to coding-agent session transcripts \
+(the WHY), so an audit finding can be answered with the agent's own reasoning.
+
+It owns no database. Session files are the only truth, and every scan starts \
+by resolving --repo to the encoded session directories of the repo and its \
+worktrees, before any file is opened.
+
+A match is always scored, and always shows the evidence that scored it. \
+`recount` would rather refuse with a reason than answer confidently from a \
+signal that could not tell two sessions apart — see `Where recount is weak` \
+in the README for the case where it does exactly that.",
+    after_help = "Run `recount help <command>` for the long form, including exit codes.",
+    after_long_help = "\
+EXIT CODES
+  0  answered
+  1  no confident match (`at`, `explain`), or a hard error
+  2  usage error from the parser
+
+EXAMPLES
+  recount doctor
+      Can a join even run here? Connector roots, session counts, and both
+      join-readiness questions: is there a ledger, are the worktrees alive.
+
+  recount sessions --repo . --since 2h
+      The transcripts belonging to this repo in the last two hours, each with
+      a fleet-identity guess marked as a guess.
+
+  recount explain --repo . --event-line 1
+      Take event 1 out of .pact/events.jsonl and show the transcript behind
+      it. One command from an audit finding to testimony.
+
+  recount at --repo . --agent skeleton --ts 2026-08-19T07:13:57Z
+      The session driving that identity at that moment, or exit 1: either a
+      refusal naming which of the two reasons applies (no cwd match, no
+      overlap), or a candidate that scored below the confidence bar, shown
+      with the evidence that fell short.
+
+  recount grep arkanoid --repo .
+      Case-insensitive substring hits as (session, line, ts, role, snippet).
+      Not a regex, by design.
+
+  recount completion zsh > \"${ZDOTDIR:-$HOME}\"/.zsh/completions/_recount
+      Generate the completion script for your shell."
 )]
 pub struct Cli {
     /// Machine-readable JSON output. The human digest is printed second.
@@ -38,13 +88,68 @@ pub enum Command {
     /// Sessions whose cwd resolves into the repo or its worktrees, fleet-identity guesses attached
     Sessions(SessionsArgs),
     /// Resolve the session driving an identity at a moment; print the transcript window
+    #[command(long_about = "\
+Resolve the session driving a fleet identity at a moment, and print the
+transcript window around it.
+
+The join key is topological: the event's worktree, then the session cwd that
+resolves into it, then a REQUIRED time-window overlap, then a transcript
+mention as tiebreaker. Every answer carries a confidence and the evidence that
+produced it; there is no code path that prints a bare answer.
+
+EXIT CODES
+  0  a confident match — the transcript window follows
+  1  no confident match. Either a structural refusal naming which of the two
+     reasons applies (`no cwd match` / `no overlap`), or a candidate that
+     scored below the confidence bar, printed WITH its evidence so you can see
+     what fell short. Both are answers, not failures.")]
     At(AtArgs),
     /// Case-insensitive substring hits with their coordinates
     Grep(GrepArgs),
     /// Read one event from .pact/events.jsonl and run `at` on it
+    #[command(long_about = "\
+Read one event out of .pact/events.jsonl and run `at` on it: one command from
+an audit finding to the agent's own words.
+
+The agent and the timestamp come from the event, and so does the worktree it
+was invoked from and any bead id in its detail field — signals `at` has no
+flags for, which is why `explain` resolves more than `at` can from the command
+line alone.
+
+Events are numbered 1-based over physical lines, so --event-line 5 is the line
+`sed -n 5p` shows, whether or not line 5 parsed.
+
+EXIT CODES: inherited from `at` unchanged — 0 confident match, 1 otherwise.
+An --event-line past the end is a clean error naming the ledger's length.")]
     Explain(ExplainArgs),
     /// Connector roots, session counts, parse-failure tallies, join-readiness
+    #[command(long_about = "\
+Report whether a join can run here at all, and if not, why not: connector
+roots, session counts, declined-versus-damaged line tallies, and both
+join-readiness questions — is there a ledger, are the worktrees still alive.
+
+ALWAYS EXITS 0, on every input, including a --repo that is not a git
+repository or does not exist. Everything is reported as a finding rather than
+raised as an error: a doctor that exits non-zero gets wrapped in `|| true` by
+every script that calls it, and then its exit code means nothing. The
+machine-readable verdict is `.join_readiness.ready` under --json.")]
     Doctor(DoctorArgs),
+    /// Print a shell completion script for recount's commands and flags
+    #[command(long_about = "\
+Print a shell completion script for recount's commands and flags, generated
+from the same clap command tree the parser uses — so it cannot offer a
+subcommand or a flag the binary does not have.
+
+The script goes to stdout alone, so it can be redirected straight into a
+completions directory:
+
+  recount completion zsh > \"${ZDOTDIR:-$HOME}\"/.zsh/completions/_recount
+
+This is the one command that does NOT follow the spec's `all --json; human
+digest second` rule. Its output is a shell program, and a digest printed
+beside it would be sourced as code, so --json is accepted and ignored here
+rather than refused.")]
+    Completion(CompletionArgs),
 }
 
 /// The window edges shared by `sessions` and `grep`.
@@ -139,6 +244,13 @@ pub struct DoctorArgs {
     /// being required.
     #[arg(long, value_name = "PATH", default_value = ".")]
     pub repo: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct CompletionArgs {
+    /// Shell to generate for
+    #[arg(value_name = "SHELL")]
+    pub shell: Shell,
 }
 
 #[cfg(test)]

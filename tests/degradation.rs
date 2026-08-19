@@ -17,8 +17,9 @@
 //!
 //! 1. **Never 101.** That is the exit code a Rust panic produces, and it is the
 //!    single most important assertion here. The exit code is 0 or 1 — never
-//!    101, and never `EXIT_UNIMPLEMENTED` either, which would mean a command
-//!    quietly stopped doing its job.
+//!    101, and never 2 either. 2 is clap's usage-error code, so a command
+//!    returning it for a well-formed invocation would mean the parser refused
+//!    input these tests believe is valid.
 //! 2. **Never half a document.** Under `--json` stdout carries exactly one
 //!    JSON value or nothing at all. A tool that emits an unterminated object
 //!    when the answer is empty is worse than one that errors, because the
