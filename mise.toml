@@ -1,2 +1,100 @@
 [tools]
 rust = "latest"
+
+# recount has NO cargo features, deliberately — docs/spec.md refuses a TUI, a
+# daemon, network, embeddings and persistence, so there is nothing to gate. That
+# is why there is no all-features/default-build pairing here: every task builds
+# the one build that exists, and a two-way leg would be ceremony guarding
+# nothing.
+
+[tasks.build]
+description = "Build the recount binary"
+run = "cargo build"
+
+[tasks.test]
+description = "Run the whole suite: unit, degradation, fixture (benches are ignored here — see `bench`)"
+# One leg, because there is one build. The benches live in tests/bench.rs behind
+# #[ignore] and are NOT run here: they generate a ~193 MB synthetic corpus and
+# take minutes, and they refuse to assert under debug_assertions anyway (a debug
+# grep over that corpus is 35.9 s against a 2 s ceiling — a number about the
+# profile, not the code).
+run = "cargo test"
+
+[tasks.bench]
+description = "Measure the two ceilings docs/spec.md sets (release, ~193 MB corpus, minutes)"
+# Release is not optional and the task encodes it rather than trusting a human to
+# remember: tests/bench.rs refuses to assert under debug_assertions, and the same
+# grep is 35.9 s in debug versus ~1.06 s in release.
+#
+# Deliberately NOT part of `check`: it writes a ~193 MB corpus into a tempdir and
+# takes minutes. A required gate with those properties is one people disable.
+# Run it when you have touched the connectors, prune, grep or the join.
+run = "cargo test --release --test bench -- --ignored --nocapture"
+
+[tasks.fmt]
+description = "Format the code"
+run = "cargo fmt"
+
+[tasks."fmt-check"]
+description = "Check formatting without writing changes"
+run = "cargo fmt -- --check"
+
+[tasks.lint]
+description = "Run clippy with warnings denied, over all targets"
+# --all-targets, not the default: the default misses tests/, and every proof
+# obligation in docs/spec.md lives there.
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks."lint-lines"]
+description = "Warn on files over the ~200-800 line house rule, counting code before tests"
+# The same script the ci workflow calls, so the local gate cannot drift from the
+# CI one.
+run = "scripts/check-lines.sh"
+
+[tasks.dogfood]
+description = "Run recount against this repo's own coordination log — the check the test suite structurally cannot be"
+# This exists because it has already paid for itself twice. The 26-agent build of
+# recount had 111 green unit tests while `sessions --repo .` was reporting every
+# transcript TWICE (once real, once as an empty generic_jsonl phantom), and while
+# `--until` was presenting real 68-167-turn transcripts as empty. Both were
+# invisible to every test and obvious in one command's output, because a fixture
+# asserts what its author already believed.
+#
+# Not in `check`: it reads ~/.claude and its output is for a human to look at,
+# not for a machine to pass. It prints and exits 0 even when it finds nothing.
+run = [
+  "cargo build",
+  "./target/debug/recount doctor --repo .",
+  "./target/debug/recount sessions --repo .",
+  # The tool's first testimony is about its own birth: event 1 is this repo's
+  # first pact context row, and it resolves to the session holding the prompt
+  # that created recount. Exit 1 here is a REASONED refusal, not a failure —
+  # see the 'Where recount is weak' section of the README — so do not let it
+  # stop the task.
+  "./target/debug/recount explain --repo . --event-line 1 || true",
+]
+
+[tasks.check]
+description = "Run the full CI check locally, serially, as CI does: fmt, lint, test, line length"
+# Sequential, and that is not a preference. `depends` runs tasks in PARALLEL, and
+# these legs all reach the binary through the single path `target/debug/recount`.
+# The integration tests spawn it via env!("CARGO_BIN_EXE_recount"), so a parallel
+# leg rebuilding that file while another leg's tests are mid-spawn is a race with
+# a confusing failure. pact's own mise.toml records losing three runs out of
+# three to exactly this; there is no reason to rediscover it.
+#
+# Same order and same commands as .github/workflows/ci.yml. A local gate that
+# does not match CI is not a gate.
+run = [
+  "mise run fmt-check",
+  "mise run lint",
+  "mise run test",
+  "mise run lint-lines",
+]
+
+[tasks.install]
+description = "Build and install the recount binary onto PATH"
+# No feature flags to choose and no completion script to refresh: recount's clap
+# surface has five subcommands and no `completion` command, so there is nothing
+# generated to go stale. If one is ever added, this is where the refresh belongs.
+run = "cargo install --path . --force"
