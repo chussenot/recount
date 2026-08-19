@@ -2,6 +2,17 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## 0.1.0 - 2026-08-19
+#### Continuous Integration
+- add the release pipeline and dependabot, adapted from pact - (9df6849) - Clement HUSSENOT-DESENONGES
+#### Documentation
+- restructure around why, and add the gate that keeps it honest - (0481175) - Clement HUSSENOT-DESENONGES
+#### Features
+- **(cli)** add `completion`, deepen --help, and reconcile the docs with both - (4a43241) - Clement HUSSENOT-DESENONGES
+#### Miscellaneous Chores
+- **(agents)** add the cli-surface-auditor, ported from pact - (457a254) - Clement HUSSENOT-DESENONGES
+
+- - -
 ## 0.0.1 - 2026-08-19
 #### Bug Fixes
 - **(at)** set declined on the test fixture so recount-hwk.45 can land - (2bad33b) - Clement HUSSENOT-DESENONGES
