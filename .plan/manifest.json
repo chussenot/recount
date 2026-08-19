@@ -73,7 +73,8 @@
     "id": "recount-hwk.29",
     "wave": 2,
     "files": [
-      "src/connector/claude_code.rs"
+      "src/connector/claude_code.rs",
+      "src/worktree.rs"
     ],
     "depends_on": [
       "recount-hwk.24",
@@ -115,7 +116,8 @@
     "id": "recount-hwk.33",
     "wave": 2,
     "files": [
-      "src/cmd/sessions.rs"
+      "src/cmd/sessions.rs",
+      "src/connector/generic_jsonl.rs"
     ],
     "depends_on": [
       "recount-hwk.24",
