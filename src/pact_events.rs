@@ -14,6 +14,35 @@
 //! job to report. recount's job is testimony, not custody. A tampered ledger
 //! produces wrong testimony, and that is pact's alarm to raise.
 //!
+//! # The 0.11.0 attribution chain is five `Option`s, forever
+//!
+//! pact 0.11.0 began stamping `harness`, `model`, `harness_session`,
+//! `harness_subagent` and `branch` on every event it writes: the chain that
+//! turns "agent `pactevents` took a lease" into "this transcript, in this
+//! session, on this branch". It is what lets the join stop guessing. Every one
+//! of the five is `Option` here, and that is the load-bearing decision of this
+//! module.
+//!
+//! Not because pact might omit them — because most of the ledger predates
+//! them. This repo's own ledger is the case in point: its first rows were
+//! written by pact 0.10.7 during recount's 0.0.1 birth and carry none of the
+//! five, and no later pact version can go back and key them. If this reader
+//! tightened the five to required fields, recount would lose the ability to
+//! audit its own history — which is the entire tool. A reader that refuses the
+//! pre-contract era is a reader that refuses the incident it was built for.
+//!
+//! The five are also independently optional, not one all-or-nothing block: a
+//! 0.11.0 row written by a top-level agent carries `harness`, `model`,
+//! `harness_session` and `branch` but no `harness_subagent`, because there is
+//! no subagent transcript to name. Consumers must test the field they need,
+//! never `harness.is_some()` as a proxy for the rest.
+//!
+//! One clause on `model`: it is DECLARED by whoever spawned the agent (the
+//! `PACT_MODEL` environment variable), not observed by pact. It records an
+//! intent, and a session transcript records what actually answered. Treating
+//! it as ground truth is a bug; comparing the two is a feature, and lives
+//! elsewhere.
+//!
 //! # Line addressing is 1-based
 //!
 //! `explain --event-line N` means "the Nth line of the file", the number `sed
@@ -57,6 +86,20 @@ pub struct Event {
     pub invoked_from: Option<String>,
     /// Free text pact attached, shown in `explain`'s digest.
     pub detail: Option<String>,
+    /// The coding-agent harness that ran the agent (`"claude-code"`). `None`
+    /// before pact 0.11.0.
+    pub harness: Option<String>,
+    /// The model the spawner DECLARED via `PACT_MODEL` — an intent, not an
+    /// observation. `None` before pact 0.11.0, or when nobody declared one.
+    pub model: Option<String>,
+    /// The harness session the agent ran in — with [`Self::harness`], the key
+    /// that names a transcript file without going through cwd at all.
+    pub harness_session: Option<String>,
+    /// The subagent transcript inside that session. `None` even on 0.11.0 rows
+    /// when a top-level agent wrote them: there is no subagent to name.
+    pub harness_subagent: Option<String>,
+    /// The git branch the agent acted on, as pact saw it.
+    pub branch: Option<String>,
 }
 
 /// A whole ledger, plus what it cost to read.
@@ -125,7 +168,8 @@ pub fn read(path: &Path) -> Result<Events> {
 
 /// The subset of the ledger row recount reads. Every other field pact writes
 /// — `kind`, `scope`, `ttl_secs`, `head`, `pact_version`, `protocol_hash`,
-/// `context_key`, `chain_hash`, and whatever 0.10.8 adds — is dropped here by
+/// `content_hash`, `context_key`, `context_value`, `chain_hash`, and whatever
+/// the version after 0.11.0 adds — is dropped here by
 /// serde's default of ignoring unknown fields. That default IS the tolerance
 /// contract: a new pact field must never turn into a parse failure.
 #[derive(Deserialize)]
@@ -138,6 +182,18 @@ struct Row {
     invoked_from: Option<String>,
     #[serde(default)]
     detail: Option<String>,
+    // The 0.11.0 attribution chain. `default` is what makes a pre-0.11.0
+    // ledger — including this repo's own first rows — still a ledger.
+    #[serde(default)]
+    harness: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    harness_session: Option<String>,
+    #[serde(default)]
+    harness_subagent: Option<String>,
+    #[serde(default)]
+    branch: Option<String>,
 }
 
 fn parse_line(raw: &str, line: usize) -> Result<Event> {
@@ -149,6 +205,11 @@ fn parse_line(raw: &str, line: usize) -> Result<Event> {
         path: row.path,
         invoked_from: row.invoked_from,
         detail: row.detail,
+        harness: row.harness,
+        model: row.model,
+        harness_session: row.harness_session,
+        harness_subagent: row.harness_subagent,
+        branch: row.branch,
     })
 }
 
@@ -192,6 +253,91 @@ mod tests {
             err.contains(&ev.line_count.to_string()),
             "out of range must name the line count, got {err:?}"
         );
+    }
+
+    /// The live ledger holds both eras — 0.10.7 rows with no attribution and
+    /// 0.11.0 rows with it — which is exactly the mixture the reader has to
+    /// survive, and the reason the five fields are `Option`.
+    #[test]
+    fn the_real_ledger_carries_both_eras() {
+        let ev = real_ledger();
+        let (keyed, bare): (Vec<_>, Vec<_>) =
+            ev.events.iter().partition(|e| e.harness_session.is_some());
+        assert!(
+            !bare.is_empty(),
+            "recount's own 0.0.1 rows predate the attribution chain and stay un-keyed"
+        );
+        assert!(!keyed.is_empty(), "pact 0.11.0 rows carry the chain");
+        assert!(
+            bare.iter().all(|e| e.harness.is_none()
+                && e.model.is_none()
+                && e.harness_subagent.is_none()
+                && e.branch.is_none()),
+            "a pre-0.11.0 row carries none of the five, and still parses"
+        );
+        assert!(
+            keyed
+                .iter()
+                .all(|e| e.harness.is_some() && e.branch.is_some()),
+            "a 0.11.0 row names its harness and its branch"
+        );
+        // Independently optional, not one block: a top-level agent's row has
+        // the session but no subagent transcript to point at.
+        assert!(
+            keyed.iter().any(|e| e.harness_subagent.is_none()),
+            "harness_subagent is absent on rows written outside a subagent"
+        );
+    }
+
+    #[test]
+    fn the_attribution_chain_is_field_by_field_optional() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                // Pre-0.11.0: not one of the five.
+                r#"{"at":"2026-08-19T07:03:12.694912822+00:00","agent":"orchestrator","kind":"context","path":null,"detail":null,"chain_hash":"75bdc538","invoked_from":"main","pact_version":"0.10.7"}"#,
+                "\n",
+                // 0.11.0, top-level agent: session and branch, no subagent.
+                r#"{"at":"2026-08-19T13:21:07Z","agent":"phase0","kind":"acquired","path":"docs/x.md","invoked_from":"main","branch":"master","model":"claude-opus-5","harness":"claude-code","harness_session":"cd7c75eb"}"#,
+                "\n",
+                // The whole chain.
+                r#"{"at":"2026-08-19T13:22:00Z","agent":"pactevents","kind":"acquired","path":"src/pact_events.rs","invoked_from":"pactevents","branch":"wt/pactevents","model":"claude-opus-5","harness":"claude-code","harness_session":"cd7c75eb","harness_subagent":"a1ded78e"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let ev = read(&path).unwrap();
+        assert_eq!(
+            ev.parse_failures, 0,
+            "a pre-0.11.0 ledger is still a ledger"
+        );
+
+        let old = ev.line(1).unwrap();
+        assert_eq!(
+            (
+                &old.harness,
+                &old.model,
+                &old.harness_session,
+                &old.harness_subagent,
+                &old.branch
+            ),
+            (&None, &None, &None, &None, &None)
+        );
+        assert_eq!(old.agent, "orchestrator");
+
+        let partial = ev.line(2).unwrap();
+        assert_eq!(partial.harness.as_deref(), Some("claude-code"));
+        assert_eq!(partial.harness_session.as_deref(), Some("cd7c75eb"));
+        assert_eq!(partial.branch.as_deref(), Some("master"));
+        assert_eq!(partial.harness_subagent, None, "no subagent to name");
+
+        let full = ev.line(3).unwrap();
+        assert_eq!(full.model.as_deref(), Some("claude-opus-5"));
+        assert_eq!(full.harness_subagent.as_deref(), Some("a1ded78e"));
+        assert_eq!(full.branch.as_deref(), Some("wt/pactevents"));
     }
 
     #[test]
