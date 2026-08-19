@@ -1,0 +1,249 @@
+[
+  {
+    "id": "recount-hwk.23",
+    "wave": 0,
+    "files": [
+      "src/main.rs",
+      "src/cli.rs",
+      "src/model.rs",
+      "src/connector/mod.rs",
+      "src/connector/claude_code.rs",
+      "src/connector/generic_jsonl.rs",
+      "src/pact_events.rs",
+      "src/worktree.rs",
+      "src/join.rs",
+      "src/prune.rs",
+      "src/cmd/mod.rs",
+      "src/cmd/sessions.rs",
+      "src/cmd/at.rs",
+      "src/cmd/grep.rs",
+      "src/cmd/explain.rs",
+      "src/cmd/doctor.rs"
+    ],
+    "depends_on": []
+  },
+  {
+    "id": "recount-hwk.24",
+    "wave": 1,
+    "files": [
+      "src/connector/mod.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.23"
+    ]
+  },
+  {
+    "id": "recount-hwk.25",
+    "wave": 0,
+    "files": [
+      "docs/format-notes.md"
+    ],
+    "depends_on": []
+  },
+  {
+    "id": "recount-hwk.26",
+    "wave": 1,
+    "files": [
+      "src/connector/generic_jsonl.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.23"
+    ]
+  },
+  {
+    "id": "recount-hwk.27",
+    "wave": 1,
+    "files": [
+      "src/pact_events.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.23"
+    ]
+  },
+  {
+    "id": "recount-hwk.28",
+    "wave": 0,
+    "files": [
+      ".github/workflows/ci.yml",
+      "rustfmt.toml"
+    ],
+    "depends_on": []
+  },
+  {
+    "id": "recount-hwk.29",
+    "wave": 2,
+    "files": [
+      "src/connector/claude_code.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.24",
+      "recount-hwk.25"
+    ]
+  },
+  {
+    "id": "recount-hwk.30",
+    "wave": 1,
+    "files": [
+      "src/worktree.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.23"
+    ]
+  },
+  {
+    "id": "recount-hwk.31",
+    "wave": 2,
+    "files": [
+      "src/join.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.27",
+      "recount-hwk.30"
+    ]
+  },
+  {
+    "id": "recount-hwk.32",
+    "wave": 1,
+    "files": [
+      "src/prune.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.23"
+    ]
+  },
+  {
+    "id": "recount-hwk.33",
+    "wave": 2,
+    "files": [
+      "src/cmd/sessions.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.24",
+      "recount-hwk.30",
+      "recount-hwk.32"
+    ]
+  },
+  {
+    "id": "recount-hwk.34",
+    "wave": 3,
+    "files": [
+      "src/cmd/grep.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.33",
+      "recount-hwk.32",
+      "recount-hwk.24"
+    ]
+  },
+  {
+    "id": "recount-hwk.35",
+    "wave": 3,
+    "files": [
+      "src/cmd/at.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.31",
+      "recount-hwk.33"
+    ]
+  },
+  {
+    "id": "recount-hwk.36",
+    "wave": 4,
+    "files": [
+      "src/cmd/explain.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.27",
+      "recount-hwk.35",
+      "recount-hwk.31"
+    ]
+  },
+  {
+    "id": "recount-hwk.37",
+    "wave": 2,
+    "files": [
+      "src/cmd/doctor.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.24",
+      "recount-hwk.27",
+      "recount-hwk.30"
+    ]
+  },
+  {
+    "id": "recount-hwk.38",
+    "wave": 4,
+    "files": [
+      "tests/common/mod.rs",
+      "tests/fixtures/",
+      "tests/join_fixture.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.31",
+      "recount-hwk.35",
+      "recount-hwk.29"
+    ]
+  },
+  {
+    "id": "recount-hwk.39",
+    "wave": 5,
+    "files": [
+      "tests/degradation.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.33",
+      "recount-hwk.35",
+      "recount-hwk.34",
+      "recount-hwk.36",
+      "recount-hwk.37"
+    ]
+  },
+  {
+    "id": "recount-hwk.40",
+    "wave": 4,
+    "files": [
+      "tests/bench.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.32",
+      "recount-hwk.35",
+      "recount-hwk.34"
+    ]
+  },
+  {
+    "id": "recount-hwk.41",
+    "wave": 3,
+    "files": [
+      "docs/format-notes.md"
+    ],
+    "depends_on": [
+      "recount-hwk.29",
+      "recount-hwk.37"
+    ]
+  },
+  {
+    "id": "recount-hwk.42",
+    "wave": 5,
+    "files": [
+      "docs/worked-example.md"
+    ],
+    "depends_on": [
+      "recount-hwk.36",
+      "recount-hwk.35"
+    ]
+  },
+  {
+    "id": "recount-hwk.43",
+    "wave": 6,
+    "files": [
+      "README.md"
+    ],
+    "depends_on": [
+      "recount-hwk.42",
+      "recount-hwk.41",
+      "recount-hwk.37",
+      "recount-hwk.40",
+      "recount-hwk.39"
+    ]
+  }
+]
