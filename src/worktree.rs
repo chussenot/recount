@@ -59,6 +59,8 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::connector::claude_code::projects_root;
+
 /// One checkout of a repo: the main worktree or a linked one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Worktree {
@@ -186,15 +188,6 @@ pub fn for_cwd<'a>(worktrees: &'a [Worktree], cwd: &Path) -> Option<&'a Worktree
         .iter()
         .filter(|w| cwd.starts_with(&w.path))
         .max_by_key(|w| w.path.components().count())
-}
-
-// ponytail: duplicates connector::claude_code::projects_root(), which is still
-// a `todo!()` body in another bead — calling it would panic every test here.
-// Collapse the two when recount-hwk.29 lands.
-fn projects_root() -> PathBuf {
-    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-        .join(".claude")
-        .join("projects")
 }
 
 #[cfg(test)]
