@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-01-15T09:59:00Z","cwd":"{{REPO}}/wt/bob","sessionId":"s-bob","message":{"role":"user","content":"You are the agent bob. alice is someone else; do not touch src/join.rs."}}
+{"type":"assistant","timestamp":"2026-01-15T10:01:00Z","cwd":"{{REPO}}/wt/bob","sessionId":"s-bob","message":{"role":"assistant","content":[{"type":"text","text":"Understood. Working in wt/bob only."}]}}

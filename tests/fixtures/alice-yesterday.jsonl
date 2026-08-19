@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-01-14T09:58:00Z","cwd":"{{REPO}}/wt/alice","sessionId":"s-alice-prev","message":{"role":"user","content":"You are the agent alice. This is the session from the day before."}}
+{"type":"assistant","timestamp":"2026-01-14T10:02:00Z","cwd":"{{REPO}}/wt/alice","sessionId":"s-alice-prev","message":{"role":"assistant","content":[{"type":"text","text":"Stopping for the day."}]}}
