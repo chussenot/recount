@@ -85,17 +85,53 @@ There are no cargo features. The spec refuses a TUI, a daemon, network,
 embeddings and persistence, so there is nothing to gate, and there is exactly
 one build.
 
+## Prebuilt binaries
+
+Every tag publishes a tarball per target, plus a `SHA256SUMS` file:
+
+| Target | Runner it was built and smoke-tested on |
+|---|---|
+| `x86_64-unknown-linux-musl` | `ubuntu-latest` |
+| `aarch64-unknown-linux-musl` | `ubuntu-24.04-arm` |
+| `aarch64-apple-darwin` | `macos-latest` |
+
+musl means static, so the Linux binaries run on any distribution regardless of
+glibc version, and inside `FROM scratch` images.
+
+Verify what you downloaded. The checksums file covers every tarball:
+
+```
+sha256sum -c SHA256SUMS
+```
+
+Releases also carry a build provenance attestation, so you can confirm which
+workflow, commit and run produced a tarball rather than trusting the filename:
+
+```
+gh attestation verify recount-<tag>-<triple>.tar.gz --repo <owner>/recount
+```
+
+**Intel macOS and Windows have no binary.** Intel macOS because GitHub retired
+the runner image and cross-compiling would ship a binary nobody executed;
+Windows for the reason below. Both build from source.
+
 ## What is not promised
 
-- **No MSRV.** CI does not pin a toolchain; it uses whatever stable Rust the
-  `ubuntu-latest` image ships. Pinning one would be making a promise nobody
-  made.
-- **No cross-platform support.** CI is one job on one platform, deliberately: a
-  matrix is three times the minutes for a promise that was never made. The
-  `claude_code` connector reads `~/.claude/projects`, and nothing in recount has
-  been tested anywhere but Linux.
+- **No MSRV.** Neither CI nor the release pins a toolchain; both use whatever
+  stable Rust the runner image ships. Pinning one would be making a promise
+  nobody made.
+- **No Windows.** Not an omission. recount resolves
+  `~/.claude/projects/<encoded-path>` from POSIX absolute paths, shells out to
+  `git worktree list --porcelain` and compares the results as unix paths, and
+  every test fixture builds a POSIX tree. A Windows binary would compile and
+  then be wrong in ways no test here would catch.
+- **The full test suite runs on Linux only.** The release builds each target on
+  its own native runner and smoke-tests the binary it just produced — version,
+  the whole command surface, `doctor` in an empty directory, and completion
+  generation — but `cargo test` itself runs in one CI job on `ubuntu-latest`.
+  A macOS binary is therefore known to *run*, not known to *pass the suite*.
 
-Both are stated rather than quietly implied, because a reader who assumes
+These are stated rather than quietly implied, because a reader who assumes
 otherwise finds out at the wrong moment.
 
 ## See also

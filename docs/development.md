@@ -171,6 +171,34 @@ answer recount was written to catch.
 Rough split: the auditor owns what the binary says about itself, the curator
 owns what the repository says about the binary.
 
+## Cutting a release
+
+`cog bump` moves `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md` together, then
+tags. Push the tag and `.github/workflows/release.yml` does the rest.
+
+It refuses more than it builds, and the refusals are the point. Before anything
+is compiled, the `integrity` job checks that the tag's commit is an **ancestor
+of `origin/master`** (a tag left behind by a rebase still resolves, still shows
+a diff, and can ship something master never had), that `Cargo.toml` and
+`Cargo.lock` both agree with the tag (a manifest that disagrees ships a binary
+whose `--version` lies), and that `CHANGELOG.md` has a section for it. Each of
+those is a minute-long failure instead of a bad release.
+
+Then one job per target builds `--locked`, strips, re-signs on macOS — `strip`
+invalidates the ad-hoc signature the linker gives every arm64 macOS binary, and
+an invalidated signature does not warn, it dies with `Killed: 9` — and runs the
+binary it just produced. Only then does `publish` checksum the tarballs, attach
+a provenance attestation and create the release.
+
+**Dry runs.** `workflow_dispatch` with a `tag` input builds and packages every
+leg and publishes nothing. It gets that behaviour from the needs-chain rather
+than from a condition of its own: the dispatch skips `integrity`, and `publish`
+needs `integrity`. The same mechanism that stops a bad tag stops a dry run, so
+the two cannot disagree.
+
+Test the pipeline that way. The alternative is cutting a tag, and a tag is not a
+thing you get to take back.
+
 ## House rules
 
 From the spec: clippy `-D warnings`, `cargo fmt`, module docs that carry

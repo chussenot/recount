@@ -19,12 +19,18 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Actions are pinned by SHA, not by tag: a tag is a moving pointer its
+      # owner can repoint at any commit, which is the supply-chain hole that
+      # `tj-actions/changed-files` fell through. The trailing comment is the
+      # human-readable version, and .github/dependabot.yml is what keeps both
+      # moving — a pin nobody updates is just an old action.
+      #
       # Caches ~/.cargo (registry, git) and ./target, keyed on the lockfile and
       # toolchain. Must sit before the cargo steps: it restores where it stands
       # and saves in its post step.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       # No toolchain action: the ubuntu-latest image ships stable Rust with
       # rustfmt and clippy already. Add dtolnay/rust-toolchain only to pin a
