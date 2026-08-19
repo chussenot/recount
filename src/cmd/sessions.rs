@@ -594,10 +594,11 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
     Ok(())
 }
 
-/// A [`Signal`] in words, for the digest. The JSON spells the same three as
-/// `topology` / `time_overlap` / `transcript_mention`, via serde.
+/// A [`Signal`] in words, for the digest. The JSON spells the same four as
+/// `keyed` / `topology` / `time_overlap` / `transcript_mention`, via serde.
 fn signal_words(signal: Signal) -> &'static str {
     match signal {
+        Signal::Keyed => "keyed",
         Signal::Topology => "topology",
         Signal::TimeOverlap => "time overlap",
         Signal::TranscriptMention => "transcript mention",
