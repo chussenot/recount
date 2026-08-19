@@ -61,7 +61,7 @@ program, and a digest printed beside it on the same run would be sourced as
 code by the very redirect the command is designed for. `--json` is therefore
 accepted and ignored there — the script goes to stdout alone, byte-identical
 with and without the flag, and stderr stays empty. This deviation is recorded
-in the README rather than patched into the frozen `spec.md`.
+in the README rather than patched into `spec.md`, which is treated as frozen.
 
 ## Commands
 

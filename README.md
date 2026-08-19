@@ -119,20 +119,6 @@ its own staleness. The tool's job is to answer one audit question well on a
 machine that owns no index; every capability above is load-bearing for a
 different job.
 
-### Credit: cass
-
-[cass](https://github.com/Dicklesworthstone/coding_agent_session_search) —
-Dicklesworthstone's coding-agent session search — is the product-scale proof
-that the underlying idea is worth having: ~685k lines, 25 connectors, SQLite +
-Tantivy, embeddings, a TUI, sync, crypto. It is what you want if you want to
-*search your agent history*, and it does that job properly.
-
-recount implements the audit-testimony 3% of it and refuses the rest. The
-refusals above are not a critique of cass; they are what remains when the
-requirement narrows from "search everything" to "answer one audit finding with
-one transcript, on a machine that owns no index". cass earned the general case.
-recount only had to earn one join.
-
 ## Where recount is weak
 
 ### The join has a ceiling, and which ceiling depends on how your fleet runs
@@ -195,9 +181,11 @@ declines, because no command accepts a bare directory.
 
 ### Deviations from the spec's literal text
 
-[docs/spec.md](docs/spec.md) is committed verbatim as the contract this tool was
-built against. Where the code departs from it, the departure is recorded here
-rather than edited into the spec:
+[docs/spec.md](docs/spec.md) was committed verbatim as the contract this tool
+was built against, and is treated as frozen: where the code departs from it, the
+departure is recorded here rather than edited into the spec. (It has been edited
+once since, to remove references to a third-party project — a change to no
+requirement, and the only edit it has had.)
 
 **`recount completion <shell>` is a sixth command, and the one that does not
 take `--json`.** The spec's command list names five and says "all `--json`;
@@ -245,4 +233,4 @@ verify afterwards, is in the beads and in `.plan/checkpoints/`.
 | [docs/performance.md](docs/performance.md) | The mtime prune, the measured ceilings, the deferral |
 | [docs/worked-example.md](docs/worked-example.md) | One real finding replayed end to end, including a wrong answer |
 | [docs/development.md](docs/development.md) | Building, testing, and why each gate exists |
-| [docs/spec.md](docs/spec.md) | The frozen contract. Never edited; deviations are recorded above |
+| [docs/spec.md](docs/spec.md) | The contract, treated as frozen; deviations are recorded above rather than patched into it |

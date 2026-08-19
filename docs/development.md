@@ -207,9 +207,10 @@ under-read — source comments here carry reasoning and bead ids, and a doc page
 that contradicts a module doc means one of the two is wrong. Determine which by
 reading the code, not by picking.
 
-`docs/spec.md` is frozen. It was committed verbatim as the contract the fleet
-built against, and where the code deliberately departs from it that belongs in
-the README's deviations section, never in an edit to the spec.
+`docs/spec.md` is treated as frozen. It was committed verbatim as the contract
+the fleet built against, and where the code deliberately departs from it that
+belongs in the README's deviations section, never in an edit to the spec. It has been edited once since, on the maintainer's instruction, to remove
+references to a third-party project. That edit changed no requirement.
 
 ## See also
 

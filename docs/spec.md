@@ -7,24 +7,24 @@ misdiagnosis (arkanoid docs/pact-audit.md), where a transcript would
 have answered in one line what artifact-inference got wrong.
 
 ## What recount refuses to be (README section, verbatim intent)
-cass (Dicklesworthstone/coding_agent_session_search, ~685k lines)
-proves the idea at product scale: 25 connectors, SQLite+Tantivy,
-embeddings, TUI, sync, crypto. recount implements the audit-testimony
-3% and refuses the rest BY DESIGN: no TUI, no daemon, no network, no
-embeddings, no fuzzy search (case-insensitive substring only), one
-connector family at launch — and NO PERSISTENCE: session files are
-the only truth; recount owns no store that can drift from sources it
-does not own. Scans are cheap structurally instead: (1) --repo
-resolves to the project's encoded session directories (repo +
-worktrees) before any file opens; (2) sessions are append-only, so
-mtime prunes files outside the query window unopened. Deferral,
-recorded in README: a metadata-only sidecar manifest (rebuilt
-wholesale on any mtime mismatch, rm-safe) may be added iff real
-windowed queries exceed ~2s on a real corpus — never a content index,
-never a database. Dependency budget: serde/serde_json, clap, chrono,
-anyhow; anything else needs a justifying comment. House rules: clippy
--D warnings, fmt, module docs that carry decisions, files sized
-~200-800 lines (the lease/context/diff unit).
+A general search over coding-agent history is a large product: many
+connectors, a full-text index, embeddings, a TUI, sync. recount
+implements the audit-testimony slice of that and refuses the rest BY
+DESIGN: no TUI, no daemon, no network, no embeddings, no fuzzy
+search (case-insensitive substring only), one connector family at
+launch — and NO PERSISTENCE: session files are the only truth;
+recount owns no store that can drift from sources it does not own.
+Scans are cheap structurally instead: (1) --repo resolves to the
+project's encoded session directories (repo + worktrees) before any
+file opens; (2) sessions are append-only, so mtime prunes files
+outside the query window unopened. Deferral, recorded in README: a
+metadata-only sidecar manifest (rebuilt wholesale on any mtime
+mismatch, rm-safe) may be added iff real windowed queries exceed ~2s
+on a real corpus — never a content index, never a database.
+Dependency budget: serde/serde_json, clap, chrono, anyhow; anything
+else needs a justifying comment. House rules: clippy -D warnings,
+fmt, module docs that carry decisions, files sized ~200-800 lines
+(the lease/context/diff unit).
 
 ## Connectors (exactly two)
 1. claude_code: sessions under ~/.claude/projects/<encoded-path>/
@@ -71,7 +71,6 @@ is pruned. Truncated/garbage fixtures. Integration: run every command
 against a repo with events but NO sessions — calm degradation, never
 a panic (recount will often run where transcripts don't exist).
 Bench: pruned `at` <100ms; unwindowed grep over 500 synthetic
-sessions (~200MB) <2s. Docs: README (incl. the refusals section and
-the cass credit), format-notes.md, and one worked example replaying a
-real past finding from this machine's history if present, else the
-fixture.
+sessions (~200MB) <2s. Docs: README (incl. the refusals section),
+format-notes.md, and one worked example replaying a real past finding
+from this machine's history if present, else the fixture.

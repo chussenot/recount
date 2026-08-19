@@ -59,7 +59,7 @@ badly.
 | File | Owns |
 |---|---|
 | `README.md` | why recount exists, why each choice is shaped this way, non-goals, where it is weak, provenance, the index |
-| `docs/spec.md` | **the frozen contract. Never edit it.** See below. |
+| `docs/spec.md` | **the contract, treated as frozen. Do not edit it.** See below. |
 | `docs/install.md` | installing, the mise tasks, shell completions, `--version` |
 | `docs/cli.md` | every command, flag, exit code and `--json` shape — the contract |
 | `docs/join.md` | the topological key, the score ladder, evidence, the two refusals, topology A vs B |
@@ -82,6 +82,13 @@ even to fix something it got wrong. Where the code deliberately departs from it,
 that belongs in the README's deviations section — which is where the
 `discover(dirs, window)` signature and the `completion` command already live.
 Adding a third deviation is normal; editing the spec to hide one is not.
+
+The freeze is a rule for *you*, not a claim about the file's history: the
+maintainer has edited it once, to remove references to a third-party project.
+That is their call to make and yours to decline. If you are ever asked to
+change a REQUIREMENT in it, say what the change would falsify elsewhere before
+making it — several pages describe the spec as frozen, and an edit that leaves
+them saying so is worse than the edit itself.
 
 ## How to work
 
