@@ -109,15 +109,13 @@ impl Connector for GenericJsonl {
     }
 
     fn discover(&self, dirs: &[PathBuf], window: &TimeWindow) -> Vec<SessionMeta> {
+        // `window` is the mtime prune and nothing else; the span filter lives
+        // once, in `connector::discover_all`. See its module doc — a connector
+        // that filters here silently releases its claim on the path.
         prune::partition(&candidates(dirs), window)
             .opened
             .iter()
             .map(|path| scan(path))
-            // mtime only prunes the lower bound (see `prune`); once a file is
-            // open its real span is known, so rule out what it now can. A file
-            // with no parsed turns has an unbounded span and survives, which is
-            // what `doctor` wants: its tallies are the point.
-            .filter(|meta| meta.window().overlaps(window))
             .collect()
     }
 
@@ -407,7 +405,9 @@ mod tests {
     ///   because `candidates` recurses (see the module doc), and kept.
     /// * `touched.jsonl` — mtime inside the window, turns entirely before it.
     ///   mtime cannot rule it out (the prune is one-sided, by design), so it
-    ///   is opened; `discover`'s own span check then drops it.
+    ///   is opened, and **still claimed**: `discover` no longer filters on the
+    ///   parsed span, because a connector that does silently releases the path
+    ///   to the next one. `discover_all` drops it, and that is asserted too.
     #[test]
     fn discover_recurses_prunes_on_mtime_and_then_on_the_real_span() {
         let dir = tempfile::tempdir().unwrap();
@@ -443,11 +443,24 @@ mod tests {
         let found = GenericJsonl.discover(&dirs, &window);
         assert_eq!(
             found.iter().map(|m| &m.path).collect::<Vec<_>>(),
-            vec![&nested],
-            "old.jsonl prunes on mtime, touched.jsonl on its real span"
+            vec![&nested, &touched],
+            "old.jsonl prunes on mtime; touched.jsonl is opened and still claimed"
         );
         assert_eq!(found[0].turn_count, 1);
         assert_eq!(found[0].connector, "generic_jsonl");
+        // The span rules `touched.jsonl` out exactly once, in `discover_all`.
+        // This connector alone, not the registry: `claude_code` is first and
+        // would claim these files itself (they are `*.jsonl` and not
+        // journals), which is the whole point of the ordering.
+        let only_this: Vec<Box<dyn Connector>> = vec![Box::new(GenericJsonl)];
+        assert_eq!(
+            crate::connector::discover_all(&only_this, &dirs, &window)
+                .iter()
+                .map(|m| &m.path)
+                .collect::<Vec<_>>(),
+            vec![&nested],
+            "the window is applied centrally, after the claim"
+        );
 
         // Unbounded: nothing prunes, everything the walk found comes back —
         // including the nested one and the unreadable one (no turns, no
