@@ -265,5 +265,24 @@
       "recount-hwk.29",
       "recount-hwk.24"
     ]
+  },
+  {
+    "id": "recount-hwk.45",
+    "wave": 4,
+    "files": [
+      "src/model.rs",
+      "src/connector/claude_code.rs",
+      "src/connector/generic_jsonl.rs",
+      "src/cmd/doctor.rs",
+      "src/cmd/sessions.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.44",
+      "recount-hwk.41",
+      "recount-hwk.29",
+      "recount-hwk.26",
+      "recount-hwk.33",
+      "recount-hwk.37"
+    ]
   }
 ]
