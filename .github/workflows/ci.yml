@@ -34,13 +34,22 @@ jobs:
       - run: cargo test
 
       # docs/spec.md house rule: "files sized ~200-800 lines (the
-      # lease/context/diff unit)". A warning, not a gate — an 850-line file is
-      # a conversation, not a build break.
+      # lease/context/diff unit)". The parenthetical is the rationale, and it is
+      # about the code a person leases, reads and diffs — not about a co-located
+      # `#[cfg(test)]` module, which is where Rust's tests idiomatically belong
+      # and which nobody edits to change behaviour. So the count stops at the
+      # first top-level `#[cfg(test)]`, and the whole file counts when there is
+      # none. A check that warns on compliant files is ignored within a week,
+      # which is worse than no check.
+      #
+      # Still a warning, not a gate — an 850-line file is a conversation, not a
+      # build break.
       - name: File length (warning only)
         run: |
           git ls-files '*.rs' | while read -r f; do
-            n=$(wc -l < "$f")
+            n=$(awk '/^#\[cfg\(test\)\]/ { print NR - 1; found = 1; exit }
+                     END { if (!found) print NR }' "$f")
             if [ "$n" -gt 800 ]; then
-              echo "::warning file=$f::$f is $n lines. docs/spec.md house rule: files sized ~200-800 lines (the lease/context/diff unit)."
+              echo "::warning file=$f::$f is $n lines of code before its tests. docs/spec.md house rule: files sized ~200-800 lines (the lease/context/diff unit)."
             fi
           done

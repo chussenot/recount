@@ -27,7 +27,37 @@
 //! connector opens anything. So the scope is an argument rather than a
 //! rediscovery inside every implementation. Pass [`Connector::roots`] and an
 //! unbounded [`TimeWindow`] for the whole-machine sweep `doctor` wants.
+//!
+//! # Who owns a path
+//!
+//! Both connectors accept `*.jsonl`, so a caller that runs the whole registry
+//! over one set of directories discovers every file **twice** — once as the
+//! transcript it is, and once as the "0 turns, N parse failures" the
+//! best-effort reader makes of the same bytes. The rule that settles it:
+//! **a path belongs to the most specific connector that recognises it.**
+//! [`discover_all`] enforces it, and every command that discovers sessions
+//! goes through it rather than over [`registry`] itself.
+//!
+//! `generic_jsonl` is therefore the fallback *by construction*, not by a flag:
+//! it is last in [`registry`], so it only ever reports what the specific
+//! connector declined.
+//!
+//! # Is `generic_jsonl` reachable through `--repo`?
+//!
+//! Essentially no, and never for a real Claude Code transcript. `--repo`
+//! resolves to this repo's encoded session directories
+//! ([`crate::worktree::session_dirs`]), which are `claude_code`'s own tree, so
+//! every transcript found there is claimed above it. The only paths that reach
+//! it are the ones `claude_code` refuses — today the `journal.jsonl` records of
+//! `docs/format-notes.md` §2.4, which are not transcripts. `doctor`'s
+//! whole-machine sweep gives it nothing either: that sweep runs each connector
+//! over its own [`Connector::roots`], and `generic_jsonl` declares none.
+//!
+//! So it runs when a caller points it at a directory of its own choosing, and
+//! that is the honest description of it: an escape hatch for a tree recount was
+//! pointed at, not a second opinion on the tree it already understands.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -66,6 +96,37 @@ pub fn registry() -> Vec<Box<dyn Connector>> {
         Box::new(claude_code::ClaudeCode),
         Box::new(generic_jsonl::GenericJsonl),
     ]
+}
+
+/// Every session under `dirs`, discovered **once**, by the first connector
+/// that claims it.
+///
+/// Claiming is not a new trait method: a connector claims a path by returning
+/// a [`SessionMeta`] for it. Connectors run in `connectors` order (pass
+/// [`registry`], which puts `claude_code` first) and a path already claimed is
+/// dropped from every later connector's results. See the module doc for the
+/// rule and for what that leaves `generic_jsonl` doing.
+///
+/// This is the registry's job rather than each command's: `sessions`, `grep`,
+/// `at` and `explain` all discover over the same directories and must all get
+/// the same answer. `connectors` is a parameter for the same reason
+/// [`crate::cmd::doctor`] takes one — so a test can drive a known set instead
+/// of whatever this machine has in `~/.claude`.
+pub fn discover_all(
+    connectors: &[Box<dyn Connector>],
+    dirs: &[PathBuf],
+    window: &TimeWindow,
+) -> Vec<SessionMeta> {
+    let mut claimed: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut out = Vec::new();
+    for connector in connectors {
+        for meta in connector.discover(dirs, window) {
+            if claimed.insert(meta.path.clone()) {
+                out.push(meta);
+            }
+        }
+    }
+    out
 }
 
 /// Every `*.jsonl` anywhere under each of `dirs`, sorted, deduplicated, and
@@ -153,6 +214,47 @@ mod tests {
     fn registry_is_exactly_the_two() {
         let names: Vec<&str> = registry().iter().map(|c| c.name()).collect();
         assert_eq!(names, ["claude_code", "generic_jsonl"]);
+    }
+
+    /// The wave-2 integration bug: run the registry over one set of dirs and
+    /// every transcript is discovered twice, the second time as garbage.
+    #[test]
+    fn discover_all_gives_each_path_to_the_first_connector_that_claims_it() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("-tmp-repo");
+        let transcript = dir.join("s.jsonl");
+        let journal = dir.join("s/subagents/workflows/wf_1/journal.jsonl");
+        fs::create_dir_all(journal.parent().unwrap()).unwrap();
+        fs::write(
+            &transcript,
+            "{\"type\":\"user\",\"timestamp\":\"2026-08-19T07:00:00.000Z\",\
+             \"cwd\":\"/tmp/repo\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+        fs::write(&journal, "{\"type\":\"started\",\"agentId\":\"wf\"}\n").unwrap();
+
+        let dirs = vec![dir];
+        let window = TimeWindow::default();
+
+        // What every caller used to do, and the defect itself: `s.jsonl` comes
+        // back twice, the second time from the fallback which cannot read it.
+        let ungoverned: Vec<SessionMeta> = registry()
+            .iter()
+            .flat_map(|c| c.discover(&dirs, &window))
+            .collect();
+        assert_eq!(ungoverned.len(), 3);
+
+        let once = discover_all(&registry(), &dirs, &window);
+        assert_eq!(once.len(), 2, "one entry per path");
+        let by_path = |p: &PathBuf| once.iter().find(|m| &m.path == p).expect("discovered");
+        let s = by_path(&transcript);
+        assert_eq!(s.connector, "claude_code", "the specific connector wins");
+        assert_eq!(s.turn_count, 1);
+        assert_eq!(s.parse_failures, 0);
+        // And the fallback still gets what the specific connector declined
+        // (§2.4: a journal is not a transcript) — which is the only way it is
+        // reachable through `--repo` at all.
+        assert_eq!(by_path(&journal).connector, "generic_jsonl");
     }
 
     /// Both layouts from `docs/format-notes.md`, plus the things that are not

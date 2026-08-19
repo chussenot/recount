@@ -36,14 +36,34 @@
 //! is **repo-scoped** and opens nothing at all — it only needs to know which
 //! encoded directories exist and how many `*.jsonl` files sit under them.
 //!
+//! # Output: the house envelope, JSON on stdout, digest on stderr
+//!
+//! The spec says of every command "all --json; human digest second", and
+//! [`crate::cmd::sessions`] settled what that means — its module doc is the
+//! statement of the rule, this is one of the four commands that follow it:
+//!
+//! * **without `--json`** — the digest, on stdout, and nothing else.
+//! * **with `--json`** — the JSON document on stdout *alone*, the same digest
+//!   on stderr, printed second. `recount doctor --json | jq` works and a person
+//!   watching still gets the reading, because the digest is not what `--json`
+//!   replaces.
+//!
+//! The document carries the same `{command, schema, ...payload}` envelope every
+//! command emits, so a script can tell two recount documents apart without
+//! guessing from their keys. `schema` moves only when a field leaves or changes
+//! meaning; added fields do not bump it and readers must ignore what they do
+//! not know.
+//!
 //! ponytail: the machine sweep reads every session file the connector can see,
 //! so on a large corpus doctor costs a full scan. That is the price of a real
 //! `parse_failures` tally — mtime cannot tell you a file is damaged. If it ever
 //! hurts, give doctor the same `--since/--until` the other commands have rather
 //! than faking the number.
 
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use anyhow::Result;
 use serde::Serialize;
 
 use crate::cli::DoctorArgs;
@@ -53,10 +73,16 @@ use crate::model::TimeWindow;
 use crate::pact_events::{self, Events};
 use crate::worktree::{self, Worktree};
 
+/// Bumped only when a field leaves or changes meaning. See the module doc.
+const SCHEMA: u32 = 1;
+
 /// The whole report. `--json` prints this; the human digest is a rendering of
 /// the same struct, so the two can never disagree.
 #[derive(Debug, Serialize)]
 pub struct Report {
+    /// The house envelope, first two fields, same as every other command.
+    pub command: &'static str,
+    pub schema: u32,
     /// `--repo`, canonicalised when it exists, verbatim when it does not.
     pub repo: PathBuf,
     pub connectors: Vec<ConnectorReport>,
@@ -116,14 +142,33 @@ pub struct WorktreeReport {
     pub sessions: usize,
 }
 
-pub fn run(args: &DoctorArgs, json: bool) -> anyhow::Result<u8> {
+pub fn run(args: &DoctorArgs, json: bool) -> Result<u8> {
     let report = report(&args.repo, &connector::registry());
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        print!("{}", digest(&report));
-    }
+    emit(
+        &report,
+        json,
+        &mut io::stdout().lock(),
+        &mut io::stderr().lock(),
+    )?;
     Ok(EXIT_OK)
+}
+
+/// JSON to stdout, digest to stderr; or, without `--json`, digest to stdout.
+/// See the module doc — this is `sessions`' rule, and the sinks are arguments
+/// for the same reason: a rule nothing tests is a suggestion.
+fn emit(report: &Report, json: bool, out: &mut dyn Write, err: &mut dyn Write) -> Result<()> {
+    let text = digest(report);
+    if json {
+        let rendered = serde_json::to_string_pretty(report)?;
+        // Write errors are ignored on purpose: `recount doctor --json | head`
+        // closing the pipe is not a failure of the command — and doctor of all
+        // commands does not fail.
+        let _ = writeln!(out, "{rendered}");
+        let _ = write!(err, "{text}");
+    } else {
+        let _ = write!(out, "{text}");
+    }
+    Ok(())
 }
 
 /// The report, with the connector list passed in rather than read from
@@ -147,6 +192,8 @@ fn report(repo: &Path, connectors: &[Box<dyn Connector>]) -> Report {
     let join_readiness = join_readiness(&repo, &mut findings);
 
     Report {
+        command: "doctor",
+        schema: SCHEMA,
         repo,
         connectors,
         join_readiness,
@@ -588,6 +635,41 @@ mod tests {
         let r = check(&repo);
         assert!(r.join_readiness.ready, "{:#?}", r.findings);
         assert!(digest(&r).contains("READY — a join can run here"));
+    }
+
+    /// The house rule of `crate::cmd::sessions`, which doctor predated: the
+    /// document goes to stdout alone, enveloped, and the digest follows it on
+    /// stderr rather than being replaced by it.
+    #[test]
+    fn json_goes_to_stdout_and_the_digest_to_stderr() {
+        let td = TempDir::new().unwrap();
+        let r = check(td.path());
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        emit(&r, true, &mut out, &mut err).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_slice(&out).expect("stdout is JSON and nothing else");
+        assert_eq!(doc["command"], "doctor");
+        assert_eq!(doc["schema"], 1);
+        // The envelope is a shape change, not a content change: everything
+        // doctor has ever reported is still there, under the same names.
+        for key in ["repo", "connectors", "join_readiness", "findings"] {
+            assert!(!doc[key].is_null(), "{key}");
+        }
+        assert_eq!(doc["join_readiness"]["ready"], false);
+        assert!(
+            String::from_utf8_lossy(&err).contains("recount doctor"),
+            "the digest is second, not gone"
+        );
+
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        emit(&r, false, &mut out, &mut err).unwrap();
+        assert!(err.is_empty(), "no --json means nothing on stderr");
+        assert!(String::from_utf8_lossy(&out).contains("recount doctor"));
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&out).is_err(),
+            "the digest is not JSON"
+        );
     }
 
     /// Make a repo's encoded session directory, and take it away again on
