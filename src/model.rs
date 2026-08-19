@@ -102,9 +102,42 @@ pub struct Turn {
 /// What a connector knows about one session file without you having to read it
 /// again.
 ///
-/// `parse_failures` is a count, never an error: the spec's tolerance contract
-/// is "one bad line never fails a file", so failures are reported as a tally
-/// that `doctor` can show rather than propagated as a `Result`.
+/// Both line tallies are counts, never errors: the spec's tolerance contract
+/// is "one bad line never fails a file", so a line that did not become a turn
+/// is reported as a number `doctor` can show rather than propagated as a
+/// `Result`.
+///
+/// # `declined` is not `parse_failures`, and the difference is the whole point
+///
+/// They were one field until `docs/format-notes.md` §5.1 measured what that
+/// cost. `doctor` reported "12 unparseable lines across 6 of 828 sessions —
+/// those transcripts are damaged, not merely skipped" on the machine recount
+/// was written on, and every word of it was false. There are **zero** JSON
+/// errors in that corpus — 333,408 lines, two independent passes. All 12 were
+/// the same 9.6-million-character line, twice each in six sibling files: one
+/// ordinary prompt that was piped a digest on stdin and re-quoted itself until
+/// it was 78.6% backslashes, retried six times in six minutes, and rejected by
+/// the API with `400 … the request is ~8391167 tokens`. Claude Code wrote all
+/// of it down byte-perfectly. The connector *declined* those lines at its 8 MB
+/// cap. It never failed to parse one.
+///
+/// One `usize` collapsed "recount chose not to read this" into "this file is
+/// hurt", and `doctor` rendered the collapsed number as damage — sending a
+/// reader to hunt corruption that does not exist. recount exists because of a
+/// misdiagnosis; a confident wrong statement in its own output is the one
+/// defect it cannot ship. So:
+///
+/// * **`declined`** — the connector could have read the line and chose not to.
+///   A policy it can name: over the line-size cap, or a shape this reader does
+///   not take. The file is fine. The number is a fact about recount's
+///   configuration, not about the transcript.
+/// * **`parse_failures`** — the connector tried and could not. Damage.
+///
+/// A line kind a connector simply is not interested in — `claude_code`'s
+/// 10,309 `attachment` lines, its fifteen non-testimony `type`s — is in
+/// neither tally. Those are structure, not loss, and burying the twelve
+/// numbers that matter under a hundred thousand that do not would recreate
+/// the defect with a nicer name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionMeta {
     pub path: PathBuf,
@@ -114,7 +147,11 @@ pub struct SessionMeta {
     pub first_ts: Option<DateTime<Utc>>,
     pub last_ts: Option<DateTime<Utc>>,
     pub turn_count: usize,
+    /// Lines the connector tried to parse and could not. DAMAGE. See above.
     pub parse_failures: usize,
+    /// Lines the connector refused to read on purpose. NOT damage. See above.
+    #[serde(default)]
+    pub declined: usize,
     /// Which connector produced this. `String` rather than `&'static str` so
     /// the type round-trips through serde without a lifetime.
     pub connector: String,
@@ -318,6 +355,7 @@ mod tests {
             last_ts: Some(ts("2026-08-19T08:00:00Z")),
             turn_count: 12,
             parse_failures: 1,
+            declined: 2,
             connector: "claude_code".into(),
         });
         rt(SessionMeta {
@@ -327,6 +365,7 @@ mod tests {
             last_ts: None,
             turn_count: 0,
             parse_failures: 0,
+            declined: 0,
             connector: "generic_jsonl".into(),
         });
         rt(TimeWindow::default());

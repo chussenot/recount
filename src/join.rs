@@ -611,6 +611,7 @@ mod tests {
             last_ts: Some(ts(last)),
             turn_count: 2,
             parse_failures: 0,
+            declined: 0,
             connector: "claude_code".into(),
         }
     }

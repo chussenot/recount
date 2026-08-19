@@ -40,7 +40,7 @@
 //!       "connector": "claude_code",
 //!       "cwd": <path|null>,                    // the most frequent one (§4.2)
 //!       "first_ts": <rfc3339|null>, "last_ts": <rfc3339|null>,
-//!       "turn_count": 128, "parse_failures": 2,
+//!       "turn_count": 128, "parse_failures": 2, "declined": 12,
 //!       "worktree": <name|null>,                  // null: the cwd did not say
 //!       "repo_match": "cwd" | "session_dir",
 //!       "fleet_identity_guess": {
@@ -87,7 +87,7 @@
 //! Discovery goes through [`connector::discover_all`], not over the registry
 //! directly: both connectors accept `*.jsonl`, so running them both over one
 //! set of directories would list every transcript twice — the second time as
-//! the fallback's "0 turns, N parse failures". `connector`'s module doc holds
+//! the fallback's "0 turns, N lines declined". `connector`'s module doc holds
 //! the ownership rule; `discovered` counts sessions, not readings of them.
 //!
 //! # No sessions is an answer
@@ -181,7 +181,12 @@ pub struct SessionEntry {
     pub first_ts: Option<DateTime<Utc>>,
     pub last_ts: Option<DateTime<Utc>>,
     pub turn_count: usize,
+    /// Lines the connector tried to parse and could not. Damage.
     pub parse_failures: usize,
+    /// Lines the connector refused to read on purpose. Not damage — see
+    /// [`SessionMeta`], where the two were one field until it made `doctor`
+    /// lie.
+    pub declined: usize,
     /// The checkout the `cwd` resolved into, `None` when the cwd did not say.
     pub worktree: Option<String>,
     pub repo_match: RepoMatch,
@@ -242,6 +247,7 @@ fn collect(
             last_ts: meta.last_ts,
             turn_count: meta.turn_count,
             parse_failures: meta.parse_failures,
+            declined: meta.declined,
             worktree: worktree.map(|w| w.name.clone()),
             repo_match,
         });
@@ -552,8 +558,11 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
                 if s.turn_count == 1 { "" } else { "s" }
             ),
         ];
+        if s.declined > 0 {
+            facts.push(format!("{} lines declined", s.declined));
+        }
         if s.parse_failures > 0 {
-            facts.push(format!("{} parse failures", s.parse_failures));
+            facts.push(format!("{} lines damaged", s.parse_failures));
         }
         facts.push(match (s.first_ts, s.last_ts) {
             (Some(a), Some(b)) => format!("{} → {}", stamp(Some(a)), stamp(Some(b))),
@@ -765,6 +774,7 @@ mod tests {
             "last_ts",
             "turn_count",
             "parse_failures",
+            "declined",
             "worktree",
             "repo_match",
             "fleet_identity_guess",
@@ -877,6 +887,7 @@ mod tests {
                     last_ts: parse_ts("2026-08-19T08:00:00Z").ok(),
                     turn_count: 1,
                     parse_failures: 0,
+                    declined: 0,
                     connector: "test".to_string(),
                 })
                 .collect()

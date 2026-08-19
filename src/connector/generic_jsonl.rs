@@ -58,21 +58,31 @@
 //! nothing is the right default for a best-effort reader, so the walk stands
 //! and the promise it broke is what changed.
 //! * **No timeless turns.** A line whose timestamp is missing or unparseable
-//!   is a parse failure, counted and skipped — not a turn with a guessed time.
-//!   The join is a time-window overlap, so a turn with no time cannot take
-//!   part in it; admitting one would only let it be silently dropped later, or
-//!   worse, matched. Same for a line with no `role`.
+//!   is declined, counted and skipped — not a turn with a guessed time. The
+//!   join is a time-window overlap, so a turn with no time cannot take part in
+//!   it; admitting one would only let it be silently dropped later, or worse,
+//!   matched. Same for a line with no `role`.
 //!
-//! # What `parse_failures` means here
+//! # `declined` and `parse_failures` — this reader says which
 //!
-//! Per the spec's "one bad line never fails a file": the tally counts every
-//! line this connector could not turn into a [`Turn`], which includes valid
-//! JSON that is simply not turn-shaped — a header record, a summary line, an
-//! event from some other stream sharing the directory. It is a record of what
-//! was skipped, not an accusation of corruption. A truncated last line, the
-//! normal state of a file a live process is still appending to, lands in it
-//! too. An unreadable file yields no turns and no failures: there were no
-//! lines to fail. Invalid UTF-8 is lossily replaced rather than discarding the
+//! Per the spec's "one bad line never fails a file", neither is an error; both
+//! are tallies [`crate::cmd::doctor`] shows. The split is the one
+//! [`SessionMeta`] defines, and here the line between them is exactly whether
+//! `serde_json` succeeded:
+//!
+//! * **`parse_failures`** — the line is not JSON. Damage. A truncated last
+//!   line, the normal state of a file a live process is still appending to,
+//!   lands here; this reader cannot tell it from a corrupted one, and says so
+//!   rather than guessing.
+//! * **`declined`** — the line is perfectly good JSON that is simply not
+//!   turn-shaped: a header record, a summary line, an event from some other
+//!   stream sharing the directory, or a turn with no usable timestamp or role.
+//!   Nothing is wrong with the file; this reader accepts one shape and that
+//!   was not it. Calling that a failure would be blaming the transcript for
+//!   the narrowness of the contract on the tin.
+//!
+//! An unreadable file yields no turns and neither tally: there were no lines
+//! to judge. Invalid UTF-8 is lossily replaced rather than discarding the
 //! whole transcript over one bad byte.
 
 use std::fs;
@@ -106,7 +116,7 @@ impl Connector for GenericJsonl {
             // mtime only prunes the lower bound (see `prune`); once a file is
             // open its real span is known, so rule out what it now can. A file
             // with no parsed turns has an unbounded span and survives, which is
-            // what `doctor` wants: its `parse_failures` are the point.
+            // what `doctor` wants: its tallies are the point.
             .filter(|meta| meta.window().overlaps(window))
             .collect()
     }
@@ -119,7 +129,7 @@ impl Connector for GenericJsonl {
 /// One file's metadata: the same parse as [`Connector::read`], keeping the ends
 /// and the tally instead of the turns.
 fn scan(path: &Path) -> SessionMeta {
-    let (turns, parse_failures) = read_turns(path);
+    let (turns, parse_failures, declined) = read_turns(path);
     // min/max rather than first/last: these files are append-only in practice,
     // but a span that lies is a silently wrong join, and the correct version is
     // the same length.
@@ -130,38 +140,42 @@ fn scan(path: &Path) -> SessionMeta {
         last_ts: turns.iter().map(|t| t.ts).max(),
         turn_count: turns.len(),
         parse_failures,
+        declined,
         connector: NAME.to_string(),
     }
 }
 
-/// Every turn in `path`, in file order, plus the count of lines that were not
-/// one. Never fails: an unreadable file is `(vec![], 0)`.
-fn read_turns(path: &Path) -> (Vec<Turn>, usize) {
+/// Every turn in `path`, in file order, plus `(damaged, declined)` for the
+/// lines that were not one — see the module doc for which is which. Never
+/// fails: an unreadable file is `(vec![], 0, 0)`.
+fn read_turns(path: &Path) -> (Vec<Turn>, usize, usize) {
     let Ok(bytes) = fs::read(path) else {
-        return (Vec::new(), 0);
+        return (Vec::new(), 0, 0);
     };
     let mut turns = Vec::new();
-    let mut failures = 0;
+    let (mut damaged, mut declined) = (0, 0);
     for (i, line) in String::from_utf8_lossy(&bytes).lines().enumerate() {
         if line.trim().is_empty() {
             continue;
         }
-        match turn_from_line(line, i + 1) {
-            Some(turn) => turns.push(turn),
-            None => failures += 1,
+        // The one question that separates the two tallies: did it parse?
+        match serde_json::from_str::<Value>(line) {
+            Err(_) => damaged += 1,
+            Ok(value) => match turn_from_value(&value, i + 1) {
+                Some(turn) => turns.push(turn),
+                None => declined += 1,
+            },
         }
     }
-    (turns, failures)
+    (turns, damaged, declined)
 }
 
-/// `None` for anything that is not a turn — bad JSON, or JSON without a usable
-/// timestamp and role.
-fn turn_from_line(line: &str, number: usize) -> Option<Turn> {
-    let value: Value = serde_json::from_str(line).ok()?;
+/// `None` for JSON that is not turn-shaped — no usable timestamp, or no role.
+fn turn_from_value(value: &Value, number: usize) -> Option<Turn> {
     Some(Turn {
-        ts: parse_ts(either(&value, "ts", "timestamp")?.as_str()?).ok()?,
+        ts: parse_ts(either(value, "ts", "timestamp")?.as_str()?).ok()?,
         role: Role::from(value.get("role")?.as_str()?.to_string()),
-        text: either(&value, "content", "text")
+        text: either(value, "content", "text")
             .map(flatten)
             .unwrap_or_default(),
         line: number,
@@ -302,7 +316,12 @@ mod tests {
 
         let meta = scan(&path);
         assert_eq!(meta.turn_count, 2);
-        assert_eq!(meta.parse_failures, 2, "blank line must not be a failure");
+        // Two lines were not turns, and they are not the same kind of not.
+        assert_eq!(meta.parse_failures, 1, "only `this is not json at all`");
+        assert_eq!(
+            meta.declined, 1,
+            "the `nope` line is fine JSON, just not a turn"
+        );
         assert_eq!(meta.cwd, None);
         assert_eq!(meta.connector, "generic_jsonl");
         assert_eq!(meta.first_ts, parse_ts("2026-08-19T07:00:00Z").ok());
@@ -319,7 +338,10 @@ mod tests {
         ));
         let meta = scan(&path);
         assert_eq!(meta.turn_count, 1);
+        // Indistinguishable from real damage through this reader, and reported
+        // as such rather than guessed at (format-notes §7.4).
         assert_eq!(meta.parse_failures, 1);
+        assert_eq!(meta.declined, 0);
         assert_eq!(meta.last_ts, parse_ts("2026-08-19T07:00:00Z").ok());
     }
 
@@ -335,10 +357,11 @@ mod tests {
         assert!(meta.window().is_unbounded());
     }
 
-    /// A missing or non-RFC-3339 timestamp, and a missing role, are failures:
-    /// a turn with no time cannot join.
+    /// A missing or non-RFC-3339 timestamp, and a missing role, are declines:
+    /// a turn with no time cannot join, but there is nothing wrong with the
+    /// file — this reader takes one shape and that was not it.
     #[test]
-    fn timeless_and_roleless_lines_are_failures() {
+    fn timeless_and_roleless_lines_are_declined_not_damaged() {
         let (_d, path) = file(concat!(
             r#"{"role":"user","content":"no time"}"#,
             "\n",
@@ -353,7 +376,8 @@ mod tests {
         ));
         let meta = scan(&path);
         assert_eq!(meta.turn_count, 0);
-        assert_eq!(meta.parse_failures, 5);
+        assert_eq!(meta.declined, 5);
+        assert_eq!(meta.parse_failures, 0, "every one of them parsed");
     }
 
     #[test]
