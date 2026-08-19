@@ -1,0 +1,46 @@
+# One job, one platform. recount makes no cross-platform or MSRV promise
+# (docs/spec.md: no network, no daemon, one connector family), so a matrix
+# would be three times the minutes for a promise nobody made.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+# A PR on a branch of this repo would otherwise run push and pull_request twice.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Caches ~/.cargo (registry, git) and ./target, keyed on the lockfile and
+      # toolchain. Must sit before the cargo steps: it restores where it stands
+      # and saves in its post step.
+      - uses: Swatinem/rust-cache@v2
+
+      # No toolchain action: the ubuntu-latest image ships stable Rust with
+      # rustfmt and clippy already. Add dtolnay/rust-toolchain only to pin a
+      # version, which would mean making the MSRV promise we don't make.
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+      # docs/spec.md house rule: "files sized ~200-800 lines (the
+      # lease/context/diff unit)". A warning, not a gate — an 850-line file is
+      # a conversation, not a build break.
+      - name: File length (warning only)
+        run: |
+          git ls-files '*.rs' | while read -r f; do
+            n=$(wc -l < "$f")
+            if [ "$n" -gt 800 ]; then
+              echo "::warning file=$f::$f is $n lines. docs/spec.md house rule: files sized ~200-800 lines (the lease/context/diff unit)."
+            fi
+          done
