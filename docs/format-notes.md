@@ -50,6 +50,12 @@ their own thing.
 | Earliest timestamp | `2026-07-02T12:33:20.334Z` | **`2026-07-02T19:39:56.172Z`** |
 | Latest timestamp | `2026-08-19T07:20:00.504Z` | `2026-08-19T08:09:49.625Z` |
 
+**Corrected 2026-08-19 16:40 (pass C):** the "subagent files" row above counts
+`agent-*.jsonl` at *any* depth and its path pattern is therefore wrong for most
+of them — 371 of 634 live one level deeper, under
+`subagents/workflows/wf_<id>/`. §11.0 splits the row and says what that costs a
+keyed lookup. Nothing else in §0 changes.
+
 Reproduce pass A: `scan.py`, `probe.py`, `probe2.py`. Reproduce pass B:
 `corpus.py` and `failscan.py` (all single-pass Python walks in the session
 scratchpad, ~40 s over the whole corpus). Pass B's session count agrees with
@@ -842,6 +848,7 @@ The gaps all run the other way, and two of them are worth an argument.
 | `sessionId`, then `session_id` | first non-empty on any line | `Identity.session_id` | §3.1, §7.1 |
 | `agentId` | first non-empty on any line | `Identity.agent_id` | §3.1, §3.4 |
 | `message.content` | `assistant`, `user` | `Turn.text` | §2.2, §2.3 |
+| `message.model` | `assistant` only; tallied per distinct value, `<synthetic>` excluded | `Identity.models` | §11.1, §11.2 |
 | `content` (top level, string) | `system` only; **absent ⇒ no turn at all** | `Turn.text` | §2.3 |
 | `subtype` | `system` only | the `[system:<subtype>]` tag | §2.3 |
 | block `.type` | every block | which renderer | §2.3 |
@@ -865,7 +872,7 @@ The gaps all run the other way, and two of them are worth an argument.
 | `thinking.signature`, `tool_use.id`, `tool_result.tool_use_id` | Identifiers for pairing blocks; recount renders turns and never pairs them. |
 | `slug` | §3.4, §8: five samples, meaning unknown. Keying anything on it would be a guess. |
 | `effort`, `version`, `entrypoint`, `userType`, `sessionKind`, `promptId`, `requestId`, `sourceToolAssistantUUID`, and all 23 names pass B added in §2.2 | §8: "read them, store them if free, key nothing on them". Nothing is free here — `SessionMeta` and `Identity` have no field for them and no caller wants one. Adding a field per name would be inventing a schema for a format that changes between point releases. |
-| sidecar `model`, `stoppedByUser` | Observed (§3.4) but absent from the `Sidecar` struct. Serde ignores them, which is the correct outcome; add them the day something reads them. |
+| sidecar `model`, `stoppedByUser` | Observed (§3.4) but absent from the `Sidecar` struct. Serde ignores them, which is the correct outcome; add them the day something reads them. The day did not come with §11: the sidecar's `model` is the spawn-time alias (`opus`), on 70 of 634 sidecars, not the slug that answered — `message.model` is on 100% of assistant lines and is the one to read (§11.1). |
 
 ### 9.3 Not read, and it is arguable — two entries
 
@@ -1051,3 +1058,169 @@ that the field is missing. The failure mode without it is §10.2.
   hundreds of transcripts has not been measured; if it ever matters, `grep -l`
   short-circuits per file and the marker is a fixed string, so `grep -F` is the
   first knob.
+
+---
+
+## 11. Two questions v0.2.0 asked of the corpus
+
+**Observed: 2026-08-19 ~16:40Z (pass C)**, on the same machine as §§0–10, by
+`claudekeyed` while building the keyed resolution the join's top tier needs.
+Pass C walked 880 `.jsonl` files with a single-pass Python reader
+(`model.py`…`model4.py` in the session scratchpad, ~30 s). Where pass C
+disagrees with A or B the text says which.
+
+> **REVERSE-ENGINEERED, EXPECT DRIFT.** As everywhere above: no published
+> schema, one machine, one day. §11.1's field is on 100% of a six-figure line
+> count today and could be renamed in the next point release, which is why the
+> connector treats its absence as silence rather than as a finding. Re-measure
+> before believing any number here.
+
+Corpus at pass C, for the two counts these subsections turn on:
+
+| Thing | Pass A (07:20) | Pass B (10:05) | **Pass C (16:40)** |
+|---|---:|---:|---:|
+| `.jsonl` files | 871 | 857 | **880** |
+| top-level `<project>/<uuid>.jsonl` | 238 | 216 | **217** |
+| subagent, **flat** `…/subagents/agent-<hex>.jsonl` | 604 | 612 | **263** |
+| subagent, **nested** `…/subagents/workflows/wf_<id>/agent-<hex>.jsonl` | — | — | **371** |
+| `journal.jsonl` | 29 | 29 | 29 |
+| `.meta.json` sidecars | 604 | 612 | **634** = 263 + 371 |
+
+The split in the middle two rows is not new format; it is a **counting error
+in passes A and B**, which totalled every `agent-*.jsonl` at any depth into one
+"subagent files" row and so implied a flatness the tree does not have. §0.1's
+diagram was right all along — it draws `workflows/wf_…/agent-<hex>.jsonl` — and
+the table under it was wrong. Every subagent has a sidecar either way.
+
+### 11.0 What `harness_session` + `harness_subagent` name — and the 371 they do not
+
+A pact 0.11.0 event carrying both ids names a file exactly, with no search:
+
+```
+<projects_root>/<encode(cwd)>/<harness_session>/subagents/agent-<harness_subagent>.jsonl
+<projects_root>/<encode(cwd)>/<harness_session>.jsonl          # subagent absent: the parent
+```
+
+One path join and one `stat`. `connector::claude_code::keyed` is that, and it
+is deliberately not more: no `candidates()`, no `read_dir`, no fallback to the
+newest file — §10.2 is what fallbacks cost here.
+
+Three outcomes, and the last two are different news:
+
+| Outcome | Means | What a human should do |
+|---|---|---|
+| resolved | the file is on disk | read it |
+| **absent** | the path is right, nothing is at it | look elsewhere — pruned (§0.0), or the ledger came from another machine |
+| **malformed** | the id is not an id | look at the ledger; nothing was stat'd |
+
+The ids are validated as **opaque tokens**: non-empty, `[A-Za-z0-9-]` only.
+Not a uuid check and not a hex check, on purpose — a stricter grammar would
+answer "malformed" to an id a later Claude Code mints legally, and this
+document's whole thesis is that it will. It is exactly strict enough that a
+`/`, a `..`, a NUL or a `~` in a corrupt or hostile ledger cannot walk out of
+the project directory it is joined into.
+
+**The ceiling: 371 of 634 subagent transcripts are nested a level deeper**, in
+`subagents/workflows/wf_<id>/`, and no pact event carries the `wf_` id. Those
+resolve `absent` and fall to the topological tier (§4.3). This costs less than
+it reads: the only recipe by which an agent can learn its own id (§10.3) globs
+`<session>/subagents/agent-*.jsonl` — flat, no recursion — so **an id that
+reached a pact event came from a flat file by construction**. If a future
+harness exposes the id directly (§10.6) that stops being true, and the fix is a
+single `read_dir` of `subagents/workflows/`, bounded and still not a walk.
+
+Not checked, on purpose: whether `agentId` inside the file matches the id in
+the event. The filename and the field agreed in 604 of 604 files (§3.1), and
+the caller that wants certainty is already reading the file (§10.5).
+
+### 11.1 The model is recorded, per turn, on every assistant line
+
+**Yes.** The answer to "does the session schema expose the model" is
+unambiguous, and it is `.message.model` on `assistant` lines:
+
+| Where | Lines | Coverage |
+|---|---:|---|
+| `.message.model` on `type:"assistant"` | 85,242 | **85,242 / 85,242 = 100%** |
+| `.model` top-level, any kind | 0 | never |
+| `.message.model` on any other kind | 0 | never |
+
+Not one assistant line in the corpus lacks it, and no other line kind carries
+it anywhere. It is written per line — **per turn, not per session** — and it is
+a bare slug, the same shape a `PACT_MODEL` value has:
+
+| Value | Lines |
+|---|---:|
+| `claude-sonnet-5` | 46,082 |
+| `claude-opus-5` | 32,222 |
+| `claude-fable-5` | 3,721 |
+| `claude-opus-4-8` | 2,063 |
+| `claude-haiku-4-5-20251001` | 1,070 |
+| `<synthetic>` (§11.2) | 80 |
+
+**It changes inside a single file, which is why the connector keeps a set.**
+36 of 851 files hold more than one value. 26 of those are a real model plus
+`<synthetic>`; the other **10 switch between two real models mid-transcript**,
+and 3 of the 10 are subagent files:
+
+```
+claude-fable-5  → claude-opus-4-8   agent-a1ee33ec9b9940ef3.jsonl   (subagent)
+claude-fable-5  → claude-opus-4-8   agent-a42e589595a0f091f.jsonl   (subagent)
+claude-fable-5  → claude-opus-4-8   agent-a06d4cc03eaabbc8d.jsonl   (subagent)
+claude-sonnet-5 → claude-opus-5     416610a6-….jsonl                (the pact session)
+```
+
+A resumed session and a mid-run `/model` both land here; nothing in the record
+distinguishes them, so do not try. **"The model of a session" does not exist**,
+exactly as "the cwd of a session" does not (§4.2). `Identity.models` therefore
+carries every distinct value, most frequent first, ties by first appearance —
+the same rule as `Identity.cwds`, so there is one rule to remember.
+
+The sidecar (§3.4) also carries a `model` key, on **70 of 634**, and it is a
+different thing: `sonnet` (56), `opus` (13), `haiku` (1) — the spawn-time
+**alias the caller asked for**, not the slug that answered. Never compare it
+against a `PACT_MODEL` value; the connector still does not read it (§9.2).
+
+### 11.2 `<synthetic>` is not a model, and treating it as one manufactures a lie
+
+80 assistant lines say `"model":"<synthetic>"`. Every one of them is a record
+Claude Code wrote itself, not a model response:
+
+| `isApiErrorMessage` | `apiErrorStatus` | Lines | What it is |
+|---|---|---:|---|
+| `true` | 429 | 37 | rate limited |
+| `true` | 401 | 19 | auth failed |
+| `true` | 400 | 10 | rejected — including §5.1's 8.4 M-token prompt |
+| `true` | absent | 4 | transport error with no status |
+| `true` | 529 | 2 | overloaded |
+| `false` | absent | 8 | `"No response requested."` — a local no-op |
+
+They carry `stop_reason: "stop_sequence"` and zero-valued `usage`, and their
+`content` is the error text. **They are still testimony** — "the run stalled
+because the API said 429" is precisely what an audit wants — so the connector
+emits them as ordinary assistant turns (§2.2 already flagged the 79
+`isApiErrorMessage` lines). Only the `model` is disowned: `<synthetic>` never
+enters `Identity.models`, because an agent declaring `PACT_MODEL=claude-opus-5`
+and hitting one rate limit would otherwise be reported as having run a
+different model than it declared. That is a fabricated discrepancy in the one
+output whose entire purpose is to be believed.
+
+### 11.3 Comparing a recorded model against a declared one
+
+For the comparison bead, with the caveats that make it honest:
+
+- **Compare slug to slug.** `PACT_MODEL=claude-opus-5` against
+  `Identity.models` is a plain string match on this corpus — verified on this
+  fleet's own 35 subagent transcripts, all of which record `claude-opus-5` and
+  all of which declared it.
+- **One of six values is dated** (`claude-haiku-4-5-20251001`). A declared
+  `claude-haiku-4-5` against that recorded value is the same model and an exact
+  match says otherwise. Prefix matching in either direction is the obvious
+  patch and it is a guess about a naming convention nobody published; a
+  "differs" that a human reads and dismisses beats a silent normalisation that
+  hides a real switch.
+- **A set, not a value.** A file can legitimately record two models (§11.1). A
+  declared model that is *among* them is not a discrepancy.
+- **Empty is silence.** A file with no assistant line — 29 of them in this
+  corpus, plus every pruned transcript — records no model. There is nothing to
+  compare and that is not a finding, not a warning and above all not an error.
+  Absence of testimony is not testimony of absence (§0.0).

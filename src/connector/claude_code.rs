@@ -136,6 +136,23 @@
 //! feature, never for the `wt/<agent>` fleets recount audits, and nothing here
 //! consumes them. §4.3 says where they live if that changes.
 //!
+//! # Two things a pact event can ask for by key (§11)
+//!
+//! A pact 0.11.0 event that carries `harness_session` and `harness_subagent`
+//! has already done the hard part. [`keyed`] turns those two ids into a path
+//! — **one join and one `stat`, never a scan** — and answers in three ways,
+//! because "the file is not there" and "that is not an id" are different news
+//! for the human reading the report. The 371 workflow-nested transcripts it
+//! cannot name are the documented ceiling; [`keyed`]'s own doc argues why that
+//! costs nothing in practice.
+//!
+//! And the answer to "does a session record which model spoke" is **yes, per
+//! turn**: `message.model` is on 85,242 of 85,242 assistant lines, it is a
+//! bare slug directly comparable to a `PACT_MODEL` value, and ten files change
+//! it mid-transcript, so it is a set on [`Identity::models`] rather than one
+//! latched value. Only `<synthetic>` is dropped: see [`SYNTHETIC`], and §11.2
+//! for why keeping it would manufacture a discrepancy out of an API timeout.
+//!
 //! # Reading (§5, §6, §7)
 //!
 //! * **8 MB line cap, drained not buffered.** Thirty-one real lines exceed
@@ -182,6 +199,12 @@ const NAME: &str = "claude_code";
 /// Above this a line is declined rather than held; see the module doc.
 const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 
+/// §11.2: what `message.model` says on an assistant line the model did not
+/// write — an API error the CLI rendered as a turn (72 of 80 on this machine),
+/// or its "No response requested." no-op (8). Never a model, so never a model
+/// this connector reports.
+const SYNTHETIC: &str = "<synthetic>";
+
 /// The line buffer is reused, so one oversized line would otherwise leave its
 /// capacity allocated for the rest of the file.
 const LINE_BUFFER_KEEP: usize = 64 * 1024;
@@ -194,6 +217,96 @@ pub fn projects_root() -> PathBuf {
     PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
         .join(".claude")
         .join("projects")
+}
+
+/// Where a keyed lookup landed (§11).
+///
+/// Three outcomes, and the last two are not the same news. `Absent` says the
+/// path is right and the file is not there — pruned by Claude Code's own
+/// 30-day retention (§0.0), or written on another machine — so the answer is
+/// "look elsewhere". `Malformed` says the id is not an id, so the answer is
+/// "look at what you were handed". Collapsing them into `None` would tell a
+/// human to go hunting for a transcript that was never named.
+///
+/// `dead_code`: the keyed tier of the join is the next bead and the tests are
+/// this type's only caller until it lands. The allow comes off with the first
+/// real one — it is not a licence for the type to stay unused.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Keyed {
+    /// The transcript is on disk, here.
+    Found(PathBuf),
+    /// Well-formed ids, and this is the path they name. Nothing is at it.
+    Absent(PathBuf),
+    /// Not an id. Nothing was joined, nothing was stat'd, no path is offered.
+    Malformed(String),
+}
+
+/// The transcript a pact event's `harness_session` / `harness_subagent` name,
+/// **without scanning**: one path join and one `stat` (§11).
+///
+/// `project_dir` is an encoded session directory —
+/// [`crate::worktree::session_dirs`] produces them, and a caller with several
+/// (a repo and its worktrees) asks each in turn; that is still a handful of
+/// stats, not a walk. `subagent` is `None` for the parent session itself,
+/// whose file is `<session>.jsonl` and whose stem equals its `sessionId` in
+/// 238 of 238 files (§3.1):
+///
+/// ```text
+/// <project_dir>/<session>.jsonl                              subagent: None
+/// <project_dir>/<session>/subagents/agent-<subagent>.jsonl   subagent: Some
+/// ```
+///
+/// Both ids are treated as **opaque tokens with a checked shape**: non-empty
+/// and `[A-Za-z0-9-]` only. That is not a uuid check or a hex check on purpose
+/// — the notes' whole thesis is that this format drifts, and a stricter rule
+/// would answer `Malformed` to an id a later Claude Code mints perfectly
+/// legally. It is exactly strict enough to make the join a join: no `/`, no
+/// `..`, no NUL, so a hostile or corrupt ledger cannot walk out of
+/// `project_dir`.
+///
+/// Nothing here reads the file. `agentId` inside it is the authority if the
+/// filename is ever doubted (§10.5), and the caller has [`scan`] for that.
+///
+/// **The ceiling, measured:** 371 of 634 subagent transcripts on this machine
+/// live one more level down, in `subagents/workflows/wf_<id>/`, and the `wf_`
+/// id is not in the event. Those are `Absent` here and belong to the
+/// topological tier. This is not the gap it looks like: the only recipe by
+/// which an agent can learn its own id (§10.3) globs the flat directory, so an
+/// id that reached a pact event came from a flat file by construction.
+#[allow(dead_code)] // Same as [`Keyed`]: the join's keyed tier is the next bead.
+pub fn keyed(project_dir: &Path, session: &str, subagent: Option<&str>) -> Keyed {
+    if let Some(why) = malformed("harness_session", session) {
+        return Keyed::Malformed(why);
+    }
+    let path = match subagent {
+        Some(id) => {
+            if let Some(why) = malformed("harness_subagent", id) {
+                return Keyed::Malformed(why);
+            }
+            project_dir
+                .join(session)
+                .join("subagents")
+                .join(format!("agent-{id}.jsonl"))
+        }
+        None => project_dir.join(format!("{session}.jsonl")),
+    };
+    // The one stat.
+    match path.is_file() {
+        true => Keyed::Found(path),
+        false => Keyed::Absent(path),
+    }
+}
+
+/// The shape check behind [`keyed`]. `None` means the token is usable as one
+/// path component.
+fn malformed(field: &str, id: &str) -> Option<String> {
+    if id.is_empty() {
+        return Some(format!("{field} is empty"));
+    }
+    id.chars()
+        .find(|c| !c.is_ascii_alphanumeric() && *c != '-')
+        .map(|c| format!("{field} {id:?} contains {c:?}, which is outside [A-Za-z0-9-]"))
 }
 
 /// The `agent-<hex>.meta.json` beside a subagent transcript (§3.4).
@@ -230,6 +343,19 @@ pub struct Identity {
     /// §3.4, the cheap discriminator. `None` for a top-level session or a
     /// subagent whose sidecar is missing.
     pub sidecar: Option<Sidecar>,
+    /// §11: every distinct `message.model` the file's assistant lines recorded,
+    /// most frequent first, ties by first appearance — the same rule as
+    /// [`Identity::cwds`], for the same reason: it is a set, and one value is
+    /// a summary of it.
+    ///
+    /// Verbatim, and it is a **slug**, not a display name: `claude-opus-5`,
+    /// `claude-haiku-4-5-20251001`. `<synthetic>` is excluded (§11.2) — it is
+    /// the CLI's own stub on an API-error record, not a model, and comparing a
+    /// declared `PACT_MODEL` against it would invent a discrepancy.
+    ///
+    /// Empty for a file with no assistant line, which is a real and unalarming
+    /// state. A comparison that has nothing to compare must stay silent.
+    pub models: Vec<String>,
 }
 
 /// One file, read once: the connector-agnostic metadata plus the
@@ -296,6 +422,7 @@ pub fn scan(path: &Path) -> Scan {
         session_id: p.session_id,
         cwds: p.cwds.into_iter().map(|(c, _)| c).collect(),
         sidecar: sidecar(path),
+        models: p.models.into_iter().map(|(m, _)| m).collect(),
     };
     Scan { meta, identity }
 }
@@ -326,6 +453,8 @@ struct Pass {
     declined: usize,
     /// Distinct cwds with their line counts, most frequent first (§4.2).
     cwds: Vec<(PathBuf, usize)>,
+    /// Distinct assistant models with their line counts, same rule (§11).
+    models: Vec<(String, usize)>,
     agent_id: Option<String>,
     session_id: Option<String>,
 }
@@ -392,7 +521,7 @@ fn pass(path: &Path) -> Pass {
 
         // §4.1: cwd is on 100% of these four kinds and 0% of the other fifteen.
         if let Some(cwd) = str_field(obj.get("cwd")) {
-            count_cwd(&mut out.cwds, PathBuf::from(cwd));
+            tally(&mut out.cwds, PathBuf::from(cwd));
         }
         // §2.3, §7.9: injected context, not speech. Its cwd counted above.
         if kind == "attachment" {
@@ -408,7 +537,17 @@ fn pass(path: &Path) -> Pass {
         };
 
         let (role, body) = match kind {
-            "assistant" => (Role::Assistant, content_text(obj.get("message"))),
+            "assistant" => {
+                // §11: `message.model` is on 85,242 of 85,242 assistant lines
+                // and on no other kind. It is per-turn and it does change
+                // mid-file, so it is tallied like `cwd` rather than latched.
+                if let Some(model) = str_field(obj.get("message").and_then(|m| m.get("model")))
+                    .filter(|m| m != SYNTHETIC)
+                {
+                    tally(&mut out.models, model);
+                }
+                (Role::Assistant, content_text(obj.get("message")))
+            }
             "user" => (Role::User, content_text(obj.get("message"))),
             // §2.2: `system` has no `message`; `subtype` says which hook or
             // boundary it is, and prose — when there is any — is a top-level
@@ -430,6 +569,7 @@ fn pass(path: &Path) -> Pass {
     // Most frequent first, ties by first appearance — `sort_by_key` is stable,
     // so insertion order survives the sort (module doc, §4.2).
     out.cwds.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    out.models.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     out
 }
 
@@ -537,13 +677,13 @@ fn str_field(v: Option<&Value>) -> Option<String> {
     }
 }
 
-/// Increment `cwd`'s tally, appending it if new. At most 9 distinct values were
-/// observed in one file (§4.2), so a linear scan beats a map and keeps
-/// insertion order for the tie-break.
-fn count_cwd(cwds: &mut Vec<(PathBuf, usize)>, cwd: PathBuf) {
-    match cwds.iter_mut().find(|(c, _)| *c == cwd) {
+/// Increment `item`'s tally, appending it if new. At most 9 distinct cwds were
+/// observed in one file (§4.2) and at most 3 distinct models (§11.1), so a
+/// linear scan beats a map and keeps insertion order for the tie-break.
+fn tally<T: PartialEq>(seen: &mut Vec<(T, usize)>, item: T) {
+    match seen.iter_mut().find(|(s, _)| *s == item) {
         Some((_, n)) => *n += 1,
-        None => cwds.push((cwd, 1)),
+        None => seen.push((item, 1)),
     }
 }
 
@@ -624,16 +764,25 @@ mod tests {
             &[
                 r#"{"type":"user","timestamp":"2026-08-19T07:00:00.000Z","cwd":"/tmp/repo","sessionId":"11111111-2222-3333-4444-555555555555","message":{"role":"user","content":"why did you delete it"}}"#,
                 r#"{"type":"mode","mode":"normal","sessionId":"11111111-2222-3333-4444-555555555555"}"#,
-                r#"{"type":"assistant","timestamp":"2026-08-19T07:02:00.000Z","cwd":"/tmp/repo","unknownFieldFromANewerVersion":42,"message":{"role":"assistant","content":[{"type":"thinking","thinking":"the file was generated","signature":"sig"},{"type":"text","text":"It was generated."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"rm -f gen.txt"}}]}}"#,
+                r#"{"type":"assistant","timestamp":"2026-08-19T07:02:00.000Z","cwd":"/tmp/repo","unknownFieldFromANewerVersion":42,"message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"thinking","thinking":"the file was generated","signature":"sig"},{"type":"text","text":"It was generated."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"rm -f gen.txt"}}]}}"#,
                 r#"{"type":"attachment","timestamp":"2026-08-19T07:02:30.000Z","cwd":"/tmp/repo","attachment":{"type":"hook_success"}}"#,
                 r#"{"type":"user","timestamp":"2026-08-19T07:03:00.000Z","cwd":"/tmp/repo","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":[{"type":"text","text":"ok"},{"type":"image"},{"type":"tool_reference"}]}]},"toolUseResult":{"stdout":"ok"}}"#,
                 r#"{"type":"system","timestamp":"2026-08-19T07:04:00.000Z","cwd":"/tmp/repo","subtype":"away_summary","content":"hook ran"}"#,
                 // A system line with no `content` at all: telemetry, not
                 // testimony, and 1,618 of the 1,963 in the corpus.
                 r#"{"type":"system","timestamp":"2026-08-19T07:04:30.000Z","cwd":"/tmp/repo","subtype":"turn_duration","durationMs":806352,"messageCount":156}"#,
+                // §11.1: a model switch mid-file — 10 real files do this, 3
+                // of them subagent transcripts. `claude-opus-5` ends up on two
+                // lines against `claude-sonnet-5`'s one, so most-frequent-first
+                // is distinguishable from first-seen here too.
+                r#"{"type":"assistant","timestamp":"2026-08-19T07:03:20.000Z","cwd":"/tmp/repo","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"switched model mid-session"}]}}"#,
+                // §11.2: not a model. An API error the CLI rendered as an
+                // assistant turn. It is testimony (it says why the run
+                // stalled) and it must never reach `Identity::models`.
+                r#"{"type":"assistant","timestamp":"2026-08-19T07:03:40.000Z","cwd":"/tmp/repo","isApiErrorMessage":true,"apiErrorStatus":429,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"API Error: 429"}]}}"#,
                 // §6.1: timestamps are not monotonic. This one is 12 hours
                 // BEFORE the file's first line and must widen the span.
-                r#"{"type":"assistant","timestamp":"2026-08-18T19:00:00.000Z","cwd":"/tmp/repo","message":{"role":"assistant","content":[{"type":"text","text":"resumed from yesterday"},{"type":"fallback"}]}}"#,
+                r#"{"type":"assistant","timestamp":"2026-08-18T19:00:00.000Z","cwd":"/tmp/repo","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"text","text":"resumed from yesterday"},{"type":"fallback"}]}}"#,
                 r#"{"type":"ai-title","aiTitle":"deleting things"}"#,
                 r#"{"type":"brand-new-kind-from-2027","whatever":true}"#,
             ],
@@ -645,7 +794,7 @@ mod tests {
             &sub.join("agent-a34d3106441943c34.jsonl"),
             &[
                 r#"{"type":"user","timestamp":"2026-08-19T07:10:00.000Z","cwd":"/tmp/repo","isSidechain":true,"sessionId":"11111111-2222-3333-4444-555555555555","agentId":"a34d3106441943c34","message":{"role":"user","content":"write the notes"}}"#,
-                r#"{"type":"assistant","timestamp":"2026-08-19T07:11:00.000Z","cwd":"/tmp/repo","agentId":"a34d3106441943c34","message":{"role":"assistant","content":[{"type":"thinking","thinking":"cwd will not name my worktree"}]}}"#,
+                r#"{"type":"assistant","timestamp":"2026-08-19T07:11:00.000Z","cwd":"/tmp/repo","agentId":"a34d3106441943c34","message":{"role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"cwd will not name my worktree"}]}}"#,
             ],
         );
         fs::write(
@@ -653,6 +802,16 @@ mod tests {
             r#"{"agentType":"general-purpose","description":"W0 empirical format-notes bead","toolUseId":"toolu_01x","spawnDepth":1,"model":"opus","stoppedByUser":false}"#,
         )
         .unwrap();
+
+        // §11: a real subagent transcript one level deeper, in a workflow
+        // directory whose `wf_` id is in no pact event. 371 of 634 on this
+        // machine look like this. `discover` reads it; `keyed` cannot name it.
+        write(
+            &sub.join("workflows/wf_1/agent-b0000000000000001.jsonl"),
+            &[
+                r#"{"type":"user","timestamp":"2026-08-19T07:12:00.000Z","cwd":"/tmp/repo","agentId":"b0000000000000001","message":{"role":"user","content":"nested in a workflow"}}"#,
+            ],
+        );
 
         // §2.4: not a transcript. discover() must not return it.
         write(
@@ -753,6 +912,10 @@ mod tests {
                 // tool_result recursing into an array of blocks.
                 "[tool_result]\nok\n[image]\n[tool_reference]",
                 "[system:away_summary]\nhook ran",
+                "switched model mid-session",
+                // An error the model did not write is still a turn: it is the
+                // reason the run stopped. Only its `model` is disowned (§11.2).
+                "API Error: 429",
                 // An unknown block type is a marker, not a crash.
                 "resumed from yesterday\n[fallback]",
             ]
@@ -764,6 +927,8 @@ mod tests {
                 Role::Assistant,
                 Role::User,
                 Role::System,
+                Role::Assistant,
+                Role::Assistant,
                 Role::Assistant
             ]
         );
@@ -772,7 +937,7 @@ mod tests {
         // shift them.
         assert_eq!(
             turns.iter().map(|t| t.line).collect::<Vec<_>>(),
-            [1, 3, 5, 6, 8]
+            [1, 3, 5, 6, 8, 9, 10]
         );
     }
 
@@ -785,7 +950,7 @@ mod tests {
         assert_eq!(s.meta.parse_failures, 0, "nothing in that file is damaged");
         assert_eq!(s.meta.declined, 0, "nor did we refuse to read anything");
         assert_eq!(
-            s.meta.turn_count, 5,
+            s.meta.turn_count, 7,
             "attachment, telemetry `system` and metadata kinds are not turns"
         );
     }
@@ -957,6 +1122,10 @@ mod tests {
             .collect();
 
         assert!(names.contains(&"agent-a34d3106441943c34.jsonl".to_string()));
+        assert!(
+            names.contains(&"agent-b0000000000000001.jsonl".to_string()),
+            "§11: a workflow-nested subagent is still a transcript"
+        );
         assert!(names.contains(&"11111111-2222-3333-4444-555555555555.jsonl".to_string()));
         assert!(
             !names.contains(&"journal.jsonl".to_string()),
@@ -968,7 +1137,7 @@ mod tests {
         );
         // The empty file survives discovery: its span is unbounded, and
         // `doctor` wants to see it.
-        assert_eq!(found.len(), 5, "{names:?}");
+        assert_eq!(found.len(), 6, "{names:?}");
 
         // A `since` past every file's mtime prunes the whole tree unopened —
         // the structural half of the spec's cheapness argument, exercised
@@ -1012,6 +1181,195 @@ mod tests {
             .discover(&[d.path().join("nope")], &TimeWindow::default())
             .is_empty());
         assert!(ClaudeCode.discover(&[], &TimeWindow::default()).is_empty());
+    }
+
+    const SESSION: &str = "11111111-2222-3333-4444-555555555555";
+
+    /// §11: one join, one stat, three answers — and the ids never escape the
+    /// directory they are joined into.
+    #[test]
+    fn keyed_resolution_tells_found_from_absent_from_nonsense() {
+        let d = fixture();
+        let proj = d.path().join("-tmp-repo");
+
+        // Resolved: the subagent transcript §10's recipe would have minted an
+        // id for.
+        assert_eq!(
+            keyed(&proj, SESSION, Some("a34d3106441943c34")),
+            Keyed::Found(proj.join(format!("{SESSION}/subagents/agent-a34d3106441943c34.jsonl")))
+        );
+        // §10.4's guard leaves `harness_subagent` unset when the match is not
+        // unique, so an event with only a session is the designed case, not an
+        // edge one: it names the parent transcript, whose stem is its
+        // `sessionId` in 238 of 238 files (§3.1).
+        assert_eq!(
+            keyed(&proj, SESSION, None),
+            Keyed::Found(proj.join(format!("{SESSION}.jsonl")))
+        );
+
+        // Absent: well-formed, correctly joined, not on disk. Pruned (§0.0) or
+        // another machine's ledger. The path comes back because that is what a
+        // human needs told.
+        assert_eq!(
+            keyed(&proj, SESSION, Some("aaaaaaaaaaaaaaaaa")),
+            Keyed::Absent(proj.join(format!("{SESSION}/subagents/agent-aaaaaaaaaaaaaaaaa.jsonl")))
+        );
+        assert!(matches!(
+            keyed(&proj, "99999999-9999-9999-9999-999999999999", None),
+            Keyed::Absent(_)
+        ));
+        // A directory is not a transcript, and neither is a project directory
+        // that does not exist at all.
+        assert!(matches!(
+            keyed(&proj, SESSION, Some("")),
+            Keyed::Malformed(_)
+        ));
+        assert!(matches!(
+            keyed(&d.path().join("-tmp-nope"), SESSION, None),
+            Keyed::Absent(_)
+        ));
+        // §11: the workflow-nested transcript exists, `discover` reads it, and
+        // the keyed tier still cannot name it — the `wf_` id is in no event.
+        // A documented Absent, not a silent wrong answer.
+        assert!(matches!(
+            keyed(&proj, SESSION, Some("b0000000000000001")),
+            Keyed::Absent(_)
+        ));
+
+        // Malformed: nonsense, not absence. Nothing is joined and nothing is
+        // stat'd — every one of these would otherwise be a path component.
+        for bad in [
+            "",
+            "..",
+            "../../etc/passwd",
+            "a/b",
+            "a\\b",
+            ".",
+            "agent.jsonl",
+            "a b",
+            "id\0",
+            "/absolute",
+            "~",
+            "$SESSION",
+        ] {
+            assert!(
+                matches!(keyed(&proj, bad, None), Keyed::Malformed(_)),
+                "session {bad:?} must be malformed"
+            );
+            assert!(
+                matches!(keyed(&proj, SESSION, Some(bad)), Keyed::Malformed(_)),
+                "subagent {bad:?} must be malformed"
+            );
+        }
+        // …and the reason names the field, because a ledger with a bad id in
+        // it is a bug in whoever wrote the ledger.
+        let Keyed::Malformed(why) = keyed(&proj, SESSION, Some("../x")) else {
+            panic!("traversal must not resolve");
+        };
+        assert!(why.contains("harness_subagent"), "{why}");
+
+        // A dash-only id is legal in shape and simply absent — the shape check
+        // exists to contain the join, not to guess Anthropic's id grammar.
+        assert!(matches!(keyed(&proj, "-", Some("-")), Keyed::Absent(_)));
+    }
+
+    /// §11.1: the model is recorded per turn, it changes within one file, and
+    /// §11.2's `<synthetic>` is not one.
+    #[test]
+    fn models_are_a_set_per_file_and_synthetic_is_not_a_model() {
+        let d = fixture();
+        let s = scan(&session(&d, "11111111-2222-3333-4444-555555555555.jsonl"));
+        assert_eq!(
+            s.identity.models,
+            ["claude-opus-5", "claude-sonnet-5"],
+            "two lines of opus beat one of sonnet, and sonnet came first"
+        );
+        assert!(
+            !s.identity.models.iter().any(|m| m == "<synthetic>"),
+            "an API-error record would be a fabricated discrepancy"
+        );
+        // A subagent records it too, which is the case the comparison needs.
+        let sub = scan(&d.path().join(format!(
+            "-tmp-repo/{SESSION}/subagents/agent-a34d3106441943c34.jsonl"
+        )));
+        assert_eq!(sub.identity.models, ["claude-opus-5"]);
+        // Nothing to compare is silence, never an error: a file with no
+        // assistant line has no model and that is not a finding.
+        assert!(
+            scan(&session(&d, "22222222-2222-3333-4444-555555555555.jsonl"))
+                .identity
+                .models
+                .is_empty()
+        );
+        assert!(
+            scan(&session(&d, "44444444-2222-3333-4444-555555555555.jsonl"))
+                .identity
+                .models
+                .is_empty()
+        );
+    }
+
+    /// The claim is that this resolution is exact on the corpus it was measured
+    /// on, so it is checked there: every flat subagent transcript on this
+    /// machine must be re-namable from the two ids alone. Read-only, and a
+    /// **skip** where `~/.claude/projects` is absent.
+    #[test]
+    fn keyed_resolution_round_trips_the_real_corpus() {
+        let root = projects_root();
+        if !root.is_dir() {
+            return;
+        }
+        let mut files: Vec<PathBuf> = candidates(&[root])
+            .into_iter()
+            // The flat layout only: §11 says the nested 371 are out of scope
+            // and this test does not get to pretend otherwise.
+            .filter(|p| p.parent().is_some_and(|d| d.ends_with("subagents")))
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+        files.sort_by_key(|p| std::cmp::Reverse(fs::metadata(p).and_then(|m| m.modified()).ok()));
+        files.truncate(40);
+
+        let mut with_model = 0usize;
+        for path in &files {
+            let session_dir = path.parent().and_then(|p| p.parent()).unwrap();
+            let project_dir = session_dir.parent().unwrap();
+            let session = session_dir.file_name().unwrap().to_string_lossy();
+            // §10.5: the id is read out of `agentId`, never parsed off the
+            // filename — which is exactly what a pact event carries.
+            let s = scan(path);
+            let Some(agent) = s.identity.agent_id.as_deref() else {
+                continue;
+            };
+            assert_eq!(
+                keyed(project_dir, &session, Some(agent)),
+                Keyed::Found(path.clone()),
+                "the two ids must re-name {}",
+                path.display()
+            );
+            // The parent session file the same event's `harness_session`
+            // names, when it has not been pruned out from under its children.
+            assert!(
+                !matches!(keyed(project_dir, &session, None), Keyed::Malformed(_)),
+                "a real session id is not malformed: {session}"
+            );
+            if !s.identity.models.is_empty() {
+                with_model += 1;
+                for m in &s.identity.models {
+                    assert!(
+                        m.starts_with("claude-"),
+                        "§11.1 says a recorded model is a bare slug, got {m:?} in {}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        assert!(
+            with_model > 0,
+            "§11.1: `message.model` is on 100% of assistant lines — 40 real \
+             subagent transcripts and not one model recorded means it moved"
+        );
     }
 
     /// The notes were measured on this machine, so the connector is checked
