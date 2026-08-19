@@ -28,6 +28,7 @@
 //! rediscovery inside every implementation. Pass [`Connector::roots`] and an
 //! unbounded [`TimeWindow`] for the whole-machine sweep `doctor` wants.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::model::{SessionMeta, TimeWindow, Turn};
@@ -61,15 +62,139 @@ pub trait Connector {
 
 /// The two connectors, in preference order. Exactly two, forever, on purpose.
 pub fn registry() -> Vec<Box<dyn Connector>> {
-    todo!("recount-hwk.24: return claude_code and generic_jsonl, and nothing else")
+    vec![
+        Box::new(claude_code::ClaudeCode),
+        Box::new(generic_jsonl::GenericJsonl),
+    ]
 }
 
-/// The `*.jsonl` files directly under each of `dirs`, sorted, opening none of
-/// them.
+/// Every `*.jsonl` anywhere under each of `dirs`, sorted, deduplicated, and
+/// opening none of them.
 ///
 /// Shared by both connectors and by `prune`'s callers: this is the "before any
 /// file opens" boundary, and it is a free function rather than a trait method
 /// so it cannot accidentally differ between the two implementations.
+///
+/// # Why this recurses
+///
+/// `docs/format-notes.md` §0 measured two shapes in the same tree, and the
+/// nested one is the majority: 238 top-level `<encoded>/<session-uuid>.jsonl`
+/// against 604 `<encoded>/<session-uuid>/subagents/agent-<id>.jsonl` (plus 29
+/// `…/subagents/workflows/wf_<id>/journal.jsonl`). A single `read_dir` level
+/// would silently miss three quarters of the corpus — and the subagent files
+/// are precisely the fleet testimony this tool exists to find. Filtering the
+/// shapes back apart is the connectors' job; this function's job is to miss
+/// nothing. (`generic_jsonl`'s doc says it does not walk subdirectories: over
+/// the flat directory of `*.jsonl` that connector describes, the recursion is
+/// a no-op, so the two statements only differ on a tree it was never pointed
+/// at.)
+///
+/// Only directory entries are consulted — no file is opened and no content is
+/// read — because the mtime prune (`crate::prune`) runs on this list and the
+/// spec's cheapness argument depends on the pruned files never being touched.
+///
+/// A `dirs` entry that does not exist, or that cannot be read, contributes
+/// nothing and is not an error: a machine with no `~/.claude` is a normal
+/// machine.
 pub fn candidates(dirs: &[PathBuf]) -> Vec<PathBuf> {
-    todo!("recount-hwk.24: list *.jsonl under each dir, sorted, no file opened: {dirs:?}")
+    let mut out = Vec::new();
+    for dir in dirs {
+        collect_jsonl(dir, &mut out);
+    }
+    // Sorted for determinism (readdir order is filesystem order, which differs
+    // between machines and between runs); deduplicated because the path
+    // encoding is not injective (format-notes §1.3), so two worktrees can
+    // legitimately hand us the same session directory twice.
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Depth-first over directory entries.
+///
+/// Symlinks are never descended into, so the walk cannot leave the root or
+/// loop. A symlink *to* a `.jsonl` is still a candidate: following that one
+/// reads a file, it does not walk a tree.
+fn collect_jsonl(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        // `DirEntry::file_type` does not follow symlinks — that is what makes
+        // the rule above hold, and on Linux it is usually the `d_type` readdir
+        // already returned rather than a second syscall.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            collect_jsonl(&path, out);
+        } else if path.extension().is_some_and(|e| e == "jsonl") {
+            out.push(path);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tempfile::TempDir;
+
+    /// Create an empty file at `rel` under `dir`, parents included.
+    fn touch(dir: &TempDir, rel: &str) -> PathBuf {
+        let path = dir.path().join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "").unwrap();
+        path
+    }
+
+    #[test]
+    fn registry_is_exactly_the_two() {
+        let names: Vec<&str> = registry().iter().map(|c| c.name()).collect();
+        assert_eq!(names, ["claude_code", "generic_jsonl"]);
+    }
+
+    /// Both layouts from `docs/format-notes.md`, plus the things that are not
+    /// sessions, plus a directory that does not exist.
+    #[test]
+    fn candidates_finds_both_layouts_and_nothing_else() {
+        let d = tempfile::tempdir().unwrap();
+        let top = touch(&d, "proj/0000-session.jsonl");
+        let nested = touch(&d, "proj/1111-session/subagents/agent-ab.jsonl");
+        let journal = touch(
+            &d,
+            "proj/1111-session/subagents/workflows/wf_1/journal.jsonl",
+        );
+        touch(&d, "proj/1111-session/subagents/agent-ab.meta.json");
+        touch(&d, "proj/notes.txt");
+        touch(&d, "proj/jsonl");
+        fs::create_dir_all(d.path().join("empty")).unwrap();
+
+        let dirs = vec![
+            d.path().join("proj"),
+            d.path().join("empty"),
+            d.path().join("does-not-exist"),
+            // Duplicated on purpose: the encoding is not injective.
+            d.path().join("proj"),
+        ];
+        assert_eq!(candidates(&dirs), vec![top, nested, journal]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn candidates_does_not_follow_symlinked_directories_out_of_the_root() {
+        let d = tempfile::tempdir().unwrap();
+        let inside = touch(&d, "root/real.jsonl");
+        let outside = touch(&d, "elsewhere/escaped.jsonl");
+        let root = d.path().join("root");
+        std::os::unix::fs::symlink(d.path().join("elsewhere"), root.join("link")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("linked.jsonl")).unwrap();
+
+        // `escaped.jsonl` is absent: the symlinked directory was not entered.
+        assert_eq!(
+            candidates(std::slice::from_ref(&root)),
+            vec![root.join("linked.jsonl"), inside]
+        );
+    }
 }
