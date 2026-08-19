@@ -127,30 +127,32 @@
   },
   {
     "id": "recount-hwk.34",
-    "wave": 3,
+    "wave": 4,
     "files": [
       "src/cmd/grep.rs"
     ],
     "depends_on": [
       "recount-hwk.33",
       "recount-hwk.32",
-      "recount-hwk.24"
+      "recount-hwk.24",
+      "recount-hwk.44"
     ]
   },
   {
     "id": "recount-hwk.35",
-    "wave": 3,
+    "wave": 4,
     "files": [
       "src/cmd/at.rs"
     ],
     "depends_on": [
       "recount-hwk.31",
-      "recount-hwk.33"
+      "recount-hwk.33",
+      "recount-hwk.44"
     ]
   },
   {
     "id": "recount-hwk.36",
-    "wave": 4,
+    "wave": 5,
     "files": [
       "src/cmd/explain.rs"
     ],
@@ -174,7 +176,7 @@
   },
   {
     "id": "recount-hwk.38",
-    "wave": 4,
+    "wave": 5,
     "files": [
       "tests/common/mod.rs",
       "tests/fixtures/",
@@ -188,7 +190,7 @@
   },
   {
     "id": "recount-hwk.39",
-    "wave": 5,
+    "wave": 6,
     "files": [
       "tests/degradation.rs"
     ],
@@ -202,7 +204,7 @@
   },
   {
     "id": "recount-hwk.40",
-    "wave": 4,
+    "wave": 5,
     "files": [
       "tests/bench.rs"
     ],
@@ -225,7 +227,7 @@
   },
   {
     "id": "recount-hwk.42",
-    "wave": 5,
+    "wave": 6,
     "files": [
       "docs/worked-example.md"
     ],
@@ -236,7 +238,7 @@
   },
   {
     "id": "recount-hwk.43",
-    "wave": 6,
+    "wave": 7,
     "files": [
       "README.md"
     ],
@@ -246,6 +248,22 @@
       "recount-hwk.37",
       "recount-hwk.40",
       "recount-hwk.39"
+    ]
+  },
+  {
+    "id": "recount-hwk.44",
+    "wave": 3,
+    "files": [
+      "src/connector/mod.rs",
+      "src/cmd/doctor.rs",
+      "src/cmd/sessions.rs",
+      ".github/workflows/ci.yml"
+    ],
+    "depends_on": [
+      "recount-hwk.33",
+      "recount-hwk.37",
+      "recount-hwk.29",
+      "recount-hwk.24"
     ]
   }
 ]

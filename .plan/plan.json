@@ -168,10 +168,11 @@
     "deps": [
       "cmdsessions",
       "prune",
-      "connector"
+      "connector",
+      "integration"
     ],
     "spec": "recount grep <needle> --repo <p> [--agent --since --until] : (session, line, ts, role, snippet) hits.",
-    "wave": 3
+    "wave": 4
   },
   {
     "key": "cmdat",
@@ -182,10 +183,11 @@
     ],
     "deps": [
       "join",
-      "cmdsessions"
+      "cmdsessions",
+      "integration"
     ],
     "spec": "recount at --repo <p> --agent <name> --ts <rfc3339> [--window 5m] : resolve the session driving that identity at that moment; print the transcript window. Exit 0 found / 1 no-confident-match with the reason (no cwd match vs no overlap).",
-    "wave": 3
+    "wave": 4
   },
   {
     "key": "cmdexplain",
@@ -200,7 +202,7 @@
       "join"
     ],
     "spec": "recount explain --repo <p> --event-line <N> : read event N from .pact/events.jsonl, run `at` on it — one command from finding to testimony.",
-    "wave": 4
+    "wave": 5
   },
   {
     "key": "cmddoctor",
@@ -232,7 +234,7 @@
       "claudecode"
     ],
     "spec": "Fixture ~/.claude tree + fixture events.jsonl with a KNOWN join: `at` finds it, and correctly refuses (exit 1 + reason) when the worktree is pruned. Truncated/garbage fixtures.",
-    "wave": 4
+    "wave": 5
   },
   {
     "key": "degradation",
@@ -249,7 +251,7 @@
       "cmddoctor"
     ],
     "spec": "Integration: run every command against a repo with events but NO sessions — calm degradation, never a panic (recount will often run where transcripts don't exist).",
-    "wave": 5
+    "wave": 6
   },
   {
     "key": "bench",
@@ -264,7 +266,7 @@
       "cmdgrep"
     ],
     "spec": "Bench: pruned `at` <100ms; unwindowed grep over 500 synthetic sessions (~200MB) <2s.",
-    "wave": 4
+    "wave": 5
   },
   {
     "key": "notespolish",
@@ -292,7 +294,7 @@
       "cmdat"
     ],
     "spec": "one worked example replaying a real past finding from this machine's history if present, else the fixture.",
-    "wave": 5
+    "wave": 6
   },
   {
     "key": "readme",
@@ -309,6 +311,25 @@
       "degradation"
     ],
     "spec": "Docs: README (incl. the refusals section and the cass credit), format-notes.md, and one worked example",
-    "wave": 6
+    "wave": 7
+  },
+  {
+    "key": "integration",
+    "title": "integration: make the connectors and the commands agree",
+    "files": [
+      "src/connector/mod.rs",
+      "src/cmd/doctor.rs",
+      "src/cmd/sessions.rs",
+      ".github/workflows/ci.yml"
+    ],
+    "deps": [
+      "cmdsessions",
+      "cmddoctor",
+      "claudecode",
+      "connector"
+    ],
+    "spec": "Connectors (exactly two) ... Commands (all --json; human digest second)",
+    "acceptance": "see bead notes",
+    "wave": 3
   }
 ]
