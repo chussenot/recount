@@ -627,6 +627,9 @@ mod tests {
             last_ts: Some(ts(last)),
             turn_count: 2,
             parse_failures: 0,
+            // recount-hwk.45: a line the connector declined (over the 8 MB cap)
+            // is not a line that was damaged. Fixtures have neither.
+            declined: 0,
             connector: "claude_code".to_string(),
         }
     }

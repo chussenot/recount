@@ -80,11 +80,20 @@
 //! * the other fifteen kinds, and any kind that does not exist yet — skipped
 //!   silently.
 //!
-//! **A skipped kind is not a parse failure.** `parse_failures` means damage:
-//! a line that is not JSON, a line that is not a JSON object, a line over the
-//! size cap, a testimony line whose timestamp will not parse. `doctor` reports
-//! that number to a human who will read it as "this file is hurt", so a line
-//! this connector simply was not interested in must never appear in it.
+//! **A skipped kind is neither tally.** [`SessionMeta`] carries two numbers
+//! and this module is careful about which one it reaches for, because `doctor`
+//! shows them to a human:
+//!
+//! * `parse_failures` means **damage** — a line that is not JSON, a line that
+//!   is not a JSON object, a testimony line whose timestamp will not parse.
+//!   The reader tried and could not.
+//! * `declined` means **this reader chose not to** — today, exactly one thing:
+//!   a line over [`MAX_LINE_BYTES`]. The line is intact; recount refused it.
+//!   §5.1 is the whole reason the two are separate fields.
+//! * a kind this connector does not read is in **neither**. An `attachment`,
+//!   a `queue-operation`, one of the other fifteen kinds: that is the format's
+//!   structure, not a loss. Tallying 10,309 attachments as "declined" would
+//!   drown the twelve lines that actually went unread.
 //!
 //! A line with no `type` at all was never observed in 169,775 lines, which
 //! §2 notes "is not a licence to panic on one" — it is treated as an unknown
@@ -129,20 +138,32 @@
 //!
 //! # Reading (§5, §6, §7)
 //!
-//! * **8 MB line cap, drained not buffered.** Twelve real lines exceed 1 MB
-//!   and the largest is 16.4 MB — a pasted binary dump, never testimony. An
-//!   oversized line is counted as a failure (content *was* lost) and the rest
-//!   of it is consumed straight out of the `BufReader` without ever being held.
-//!   One enormous line never aborts a file.
+//! * **8 MB line cap, drained not buffered.** Thirty-one real lines exceed
+//!   1 MB; **twelve** exceed 10 MB, those twelve are exactly the ones over the
+//!   cap, and the largest is 16.4 MB. They are **not** a pasted dump. They are
+//!   the human's own bare-string prompt — the testimony §2.3 calls "precisely
+//!   what recount exists to find" — wrecked by runaway self-escaping and
+//!   retried six times in six minutes until the API answered `400 … the
+//!   request is ~8391167 tokens` (§5.1). It is the most audit-worthy line in
+//!   the corpus, and it is still skipped: 9.6 MB of backslashes helps nobody
+//!   and holding it costs 16 MB. But it is skipped *knowingly*, so it counts
+//!   as [`SessionMeta::declined`], never as damage — the file it lives in is
+//!   byte-perfect JSON. The rest of the line is consumed straight out of the
+//!   `BufReader` without ever being held; one enormous line never aborts a
+//!   file. If the cap ever needs a better answer than "drop", §5.1 says the
+//!   answer is a truncated excerpt with a marker, not a bigger buffer.
 //! * **Bytes, lossily.** A tool result can hold arbitrary program output.
 //! * **min/max for the span, never first/last.** 246 files contain timestamp
 //!   inversions, worst 12 hours (§6.1). Nothing here binary-searches or stops
 //!   early on time.
 //! * **A truncated tail is one parse failure at the last line.** §7.4 asks for
 //!   it to be reported distinctly as `truncated_tail: true`; [`SessionMeta`]
-//!   has no such field and belongs to another bead, so the distinction is not
-//!   available today — recorded in the notes' §7.4 rather than smuggled in
-//!   here. "Counted, not fatal" is satisfied either way.
+//!   still has no such field, so a benign half-written tail and a genuinely
+//!   broken line remain one number. That is a smaller lie than the one §7.4's
+//!   third case caused — recount's own cap reported as corruption — and that
+//!   one is fixed: it is [`SessionMeta::declined`] now. "Counted, not fatal" is
+//!   satisfied either way; if the benign/damaged split is ever worth acting on,
+//!   it is the same shape of change as this one.
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
@@ -157,8 +178,8 @@ use crate::prune;
 
 const NAME: &str = "claude_code";
 
-/// §5: 12 real lines exceed 1 MB and one is 16.4 MB. Above this a line is
-/// dropped rather than held; see the module doc.
+/// §5: 31 real lines exceed 1 MB, 12 exceed 10 MB, and the largest is 16.4 MB.
+/// Above this a line is declined rather than held; see the module doc.
 const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 
 /// The line buffer is reused, so one oversized line would otherwise leave its
@@ -242,7 +263,7 @@ impl Connector for ClaudeCode {
             // mtime prunes only the lower bound (see `prune`); once a file is
             // open its real span is known, so rule out what it now can. A file
             // with no parsed turns has an unbounded span and survives, which is
-            // what `doctor` wants: its `parse_failures` are the point.
+            // what `doctor` wants: its tallies are the point.
             .filter(|meta| meta.window().overlaps(window))
             .collect()
     }
@@ -267,6 +288,7 @@ pub fn scan(path: &Path) -> Scan {
         last_ts: p.turns.iter().map(|t| t.ts).max(),
         turn_count: p.turns.len(),
         parse_failures: p.failures,
+        declined: p.declined,
         connector: NAME.to_string(),
     };
     let identity = Identity {
@@ -298,7 +320,10 @@ fn is_journal(path: &Path) -> bool {
 #[derive(Default)]
 struct Pass {
     turns: Vec<Turn>,
+    /// Lines that did not parse. Damage.
     failures: usize,
+    /// Lines over the cap. Not damage — see the module doc.
+    declined: usize,
     /// Distinct cwds with their line counts, most frequent first (§4.2).
     cwds: Vec<(PathBuf, usize)>,
     agent_id: Option<String>,
@@ -319,9 +344,11 @@ fn pass(path: &Path) -> Pass {
             Read1::End => break,
             Read1::Oversized => {
                 number += 1;
-                // Content was lost, so this is damage and is tallied. It is
-                // also never testimony: at 8 MB it is a pasted dump (§5).
-                out.failures += 1;
+                // Content *was* lost, and on this machine it was the human's
+                // own prompt (§5.1) — so it is tallied, but as a line recount
+                // declined to read, never as a line that failed to parse. The
+                // file around it is intact.
+                out.declined += 1;
                 continue;
             }
             Read1::Line => number += 1,
@@ -749,13 +776,14 @@ mod tests {
         );
     }
 
-    /// `parse_failures` means damage. Fifteen line kinds, an attachment and a
-    /// kind that does not exist yet are none of them.
+    /// Neither tally. Fifteen line kinds, an attachment and a kind that does
+    /// not exist yet are structure, not loss.
     #[test]
     fn skipped_line_kinds_are_not_parse_failures() {
         let d = fixture();
         let s = scan(&session(&d, "11111111-2222-3333-4444-555555555555.jsonl"));
         assert_eq!(s.meta.parse_failures, 0, "nothing in that file is damaged");
+        assert_eq!(s.meta.declined, 0, "nor did we refuse to read anything");
         assert_eq!(
             s.meta.turn_count, 5,
             "attachment, telemetry `system` and metadata kinds are not turns"
@@ -818,6 +846,7 @@ mod tests {
         // Garbage, a non-object line, a testimony line with no timestamp, and
         // the truncated tail. The blank line is free.
         assert_eq!(s.meta.parse_failures, 4);
+        assert_eq!(s.meta.declined, 0, "damage is not a policy skip");
         assert_eq!(s.meta.turn_count, 2);
     }
 
@@ -872,21 +901,36 @@ mod tests {
         );
     }
 
-    /// §5: one 16 MB line exists in the wild. It must cost one tally, not the
-    /// file — and the turns after it are the ones the audit came for.
+    /// **The bead.** A line we declined is not a line that was damaged.
+    ///
+    /// One oversized line and one genuinely malformed line in the same file
+    /// must come back as `declined=1, damaged=1` — never as 2 of either. On
+    /// the machine recount was written on the real answer is 12 and 0 (§5.1),
+    /// and `doctor` reported it as 12 lines of damage in transcripts that are
+    /// byte-perfect. This fixture is that bug, small enough to run.
     #[test]
-    fn an_oversized_line_is_skipped_not_fatal() {
+    fn an_oversized_line_is_declined_a_broken_one_is_damaged() {
         let d = tempfile::tempdir().unwrap();
         let path = d.path().join("huge.jsonl");
         let good = r#"{"type":"user","timestamp":"2026-08-19T07:00:00.000Z","cwd":"/tmp/repo","message":{"role":"user","content":"survivor"}}"#;
+        // §5.1: not a binary dump — the human's own prompt, self-escaped until
+        // it would not fit. The file around it is perfectly good JSON.
         let huge = format!(
             r#"{{"type":"user","timestamp":"2026-08-19T07:01:00.000Z","cwd":"/tmp/repo","message":{{"role":"user","content":"{}"}}}}"#,
             "x".repeat(MAX_LINE_BYTES + 1024)
         );
-        fs::write(&path, format!("{huge}\n{good}\n{huge}")).unwrap();
+        let broken = r#"{"type":"user","timestamp":"2026-08-19T07:02:0"#;
+        fs::write(&path, format!("{huge}\n{good}\n{broken}\n")).unwrap();
 
         let s = scan(&path);
-        assert_eq!(s.meta.parse_failures, 2, "both oversized lines counted");
+        assert_eq!(
+            s.meta.declined, 1,
+            "the oversized line: we refused to read it"
+        );
+        assert_eq!(
+            s.meta.parse_failures, 1,
+            "the truncated line: it is damaged"
+        );
         assert_eq!(s.meta.turn_count, 1);
         assert_eq!(ClaudeCode.read(&path)[0].text, "survivor");
         assert_eq!(
@@ -894,6 +938,11 @@ mod tests {
             2,
             "the oversized line still occupies its line number"
         );
+
+        // And two oversized lines are two declines, not a rounding of "some".
+        fs::write(&path, format!("{huge}\n{good}\n{huge}")).unwrap();
+        let s = scan(&path);
+        assert_eq!((s.meta.declined, s.meta.parse_failures), (2, 0));
     }
 
     /// Both layouts arrive, `journal.jsonl` does not, and the mtime window is
