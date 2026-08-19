@@ -11,33 +11,1015 @@
 //! not fatal, one bad line never fails a file. A `.jsonl` written by a process
 //! that is still running will have a half-line at the end; that is the normal
 //! case, not corruption.
+//!
+//! # Two layouts, one connector (notes §0.1)
+//!
+//! ```text
+//! <encoded>/<session-uuid>.jsonl                              238 files
+//! <encoded>/<session-uuid>/subagents/agent-<hex>.jsonl        604 files
+//! <encoded>/<session-uuid>/subagents/agent-<hex>.meta.json    the sidecar
+//! <encoded>/<session-uuid>/subagents/workflows/wf_*/journal.jsonl   NOT a transcript
+//! ```
+//!
+//! Three quarters of the corpus — and all of the fleet testimony recount
+//! exists to retrieve — is in the nested shape. [`crate::connector::candidates`]
+//! recurses, so both arrive here; [`discover`](ClaudeCode::discover) drops only
+//! `journal.jsonl`, which holds `started`/`result` records with no `cwd`, no
+//! `timestamp` and no `message` (§2.4) and would otherwise show up in `doctor`
+//! forever as 29 sessions that have no cwd.
+//!
+//! # What a `Turn`'s `text` contains, per block type (§2.3)
+//!
+//! `message.content` is a bare string 1,977 times and an array of blocks
+//! 132,093 times, and the bare strings are almost entirely the human's own
+//! typed prompts. Both are read. A bare string is the text, verbatim and
+//! untagged. An array is its blocks, rendered one per entry and joined with
+//! newlines:
+//!
+//! | block | rendered as |
+//! |---|---|
+//! | `text` | the text, verbatim, no tag |
+//! | `thinking` | `[thinking]\n` + the reasoning, in full |
+//! | `tool_use` | `[tool_use <name>]\n` + `input` as compact JSON |
+//! | `tool_result` | `[tool_result]\n` (or `[tool_result error]`) + its content, recursively |
+//! | `image` | `[image]` — the marker only, never the bytes |
+//! | anything else | `[<type>]` — `fallback` already exists and is undocumented |
+//!
+//! **`thinking` is extracted in full and this is the most consequential
+//! decision in the module.** It is 24,851 blocks against `text`'s 13,347: the
+//! single largest body of an agent's stated reasoning in the corpus, and
+//! recount's entire job is answering "WHY". Dropping it to keep transcripts
+//! tidy would gut the tool. The tag exists so that a `grep` hit can be
+//! attributed — reasoning read differently from speech in an audit — and so
+//! the README can warn that `recount grep` searches reasoning the user may not
+//! expect to be searchable (§2.3).
+//!
+//! `tool_result.content` is itself a string 46,004 times and an array 854
+//! times, so the same renderer recurses one level into it.
+//!
+//! # Which lines become turns
+//!
+//! Nineteen `type` values occur (§2). Four carry `cwd` and content —
+//! `assistant`, `user`, `attachment`, `system` — and only three of those
+//! become turns:
+//!
+//! * `assistant`, `user` — testimony, always.
+//! * `system` — hooks and compaction, rendered `[system:<subtype>]\n<content>`,
+//!   **when it has any content**. The notes' §2 table said a `system` line
+//!   carries `content` as a string; re-measured over the whole corpus while
+//!   writing this module, 1,618 of 1,963 do not — `turn_duration` (828) and
+//!   `stop_hook_summary` (790) carry only `durationMs`/`hookCount` telemetry.
+//!   Those are skipped after their `cwd` is counted, exactly like an
+//!   attachment, and the notes' table has been corrected. The 345 that do
+//!   carry prose (`away_summary`, `local_command`, `compact_boundary`,
+//!   `scheduled_task_fire`, …) become turns.
+//! * `attachment` — read for its `cwd` and then **skipped** (§2.3, §7.9):
+//!   10,309 lines of injected boilerplate (`hook_success`, `task_reminder`,
+//!   `total_tokens_reminder`) that is neither human nor model speech and would
+//!   flood every `grep` result.
+//! * the other fifteen kinds, and any kind that does not exist yet — skipped
+//!   silently.
+//!
+//! **A skipped kind is not a parse failure.** `parse_failures` means damage:
+//! a line that is not JSON, a line that is not a JSON object, a line over the
+//! size cap, a testimony line whose timestamp will not parse. `doctor` reports
+//! that number to a human who will read it as "this file is hurt", so a line
+//! this connector simply was not interested in must never appear in it.
+//!
+//! A line with no `type` at all was never observed in 169,775 lines, which
+//! §2 notes "is not a licence to panic on one" — it is treated as an unknown
+//! kind and skipped, not tallied, because the JSON itself was intact.
+//!
+//! `queue-operation` (2,076 lines) does carry a timestamp and queued user text
+//! but no `cwd`, so it can never take part in a topological join; it is left
+//! in the skipped set with the rest.
+//!
+//! # cwd is a set, and `SessionMeta.cwd` is the most frequent member
+//!
+//! 46 of 871 files hold more than one `cwd` and one holds nine (§4.2), so
+//! "the session's cwd" does not exist. [`SessionMeta::cwd`] has room for one
+//! value, so the rule is: **the most frequently occurring cwd wins, ties broken
+//! by first appearance.** Most-frequent rather than first because the real
+//! example in §4.2 — 167 lines at the repo root against 175 in a worktree —
+//! resolves to the more specific and more informative of the two, where "first"
+//! would have answered with whichever directory the process happened to start
+//! in.
+//!
+//! One value is not enough for a correct `sessions --repo`, which must match
+//! if **any** cwd resolves into the repo (§4.2), so the whole set is surfaced
+//! as [`Identity::cwds`], ordered by that same rule. A caller that uses
+//! `meta.cwd` alone is getting a summary, not the evidence.
+//!
+//! # What the join gets that `SessionMeta` has no field for
+//!
+//! [`Identity`], from [`scan`]. `sessionId` is **not** a per-file identity —
+//! all 604 subagent files carry their parent's (§3.1) — so `agent_id` (which
+//! equals the filename hex in 604 of 604 files) is carried beside it, and the
+//! sidecar's `description` ("W0 empirical format-notes bead") is carried too.
+//! Under the subagent topology this fleet actually runs (§4.3) every agent
+//! shares one `cwd` and the topological chain cannot discriminate between
+//! siblings; the sidecar `description` and a transcript mention are the only
+//! signals that can, and the sidecar costs one small file read and no
+//! transcript. [`sidecar`] is public separately for exactly that reason.
+//!
+//! Not surfaced, deliberately: `worktree-state` / `relocated` (§4.3 signals 2)
+//! are authoritative but only ever appear for Claude Code's own `/worktree`
+//! feature, never for the `wt/<agent>` fleets recount audits, and nothing here
+//! consumes them. §4.3 says where they live if that changes.
+//!
+//! # Reading (§5, §6, §7)
+//!
+//! * **8 MB line cap, drained not buffered.** Twelve real lines exceed 1 MB
+//!   and the largest is 16.4 MB — a pasted binary dump, never testimony. An
+//!   oversized line is counted as a failure (content *was* lost) and the rest
+//!   of it is consumed straight out of the `BufReader` without ever being held.
+//!   One enormous line never aborts a file.
+//! * **Bytes, lossily.** A tool result can hold arbitrary program output.
+//! * **min/max for the span, never first/last.** 246 files contain timestamp
+//!   inversions, worst 12 hours (§6.1). Nothing here binary-searches or stops
+//!   early on time.
+//! * **A truncated tail is one parse failure at the last line.** §7.4 asks for
+//!   it to be reported distinctly as `truncated_tail: true`; [`SessionMeta`]
+//!   has no such field and belongs to another bead, so the distinction is not
+//!   available today — recorded in the notes' §7.4 rather than smuggled in
+//!   here. "Counted, not fatal" is satisfied either way.
 
+use std::fs;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
-use crate::connector::Connector;
-use crate::model::{SessionMeta, TimeWindow, Turn};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::connector::{candidates, Connector};
+use crate::model::{parse_ts, Role, SessionMeta, TimeWindow, Turn};
+use crate::prune;
+
+const NAME: &str = "claude_code";
+
+/// §5: 12 real lines exceed 1 MB and one is 16.4 MB. Above this a line is
+/// dropped rather than held; see the module doc.
+const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
+
+/// The line buffer is reused, so one oversized line would otherwise leave its
+/// capacity allocated for the rest of the file.
+const LINE_BUFFER_KEEP: usize = 64 * 1024;
 
 /// The root of the encoded per-project session directories.
+///
+/// Returned whether or not it exists — `doctor` reports the root it looked in,
+/// and "the place you expected is not there" is the answer people need.
 pub fn projects_root() -> PathBuf {
-    todo!("recount-hwk.29: $HOME/.claude/projects, per docs/format-notes.md")
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+        .join(".claude")
+        .join("projects")
+}
+
+/// The `agent-<hex>.meta.json` beside a subagent transcript (§3.4).
+///
+/// Every field is optional: 604 of 604 sidecars exist today, but §8 flags that
+/// a subagent killed before its sidecar was flushed is plausible, and the
+/// observed key set already varies (`model`, `stoppedByUser`). No
+/// `deny_unknown_fields`, ever.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Sidecar {
+    /// e.g. `general-purpose`, `Explore`, `workflow-subagent`.
+    pub agent_type: Option<String>,
+    /// The spawning task's one-line label — "W0 empirical format-notes bead".
+    /// The strongest identity signal a subagent has (§4.3).
+    pub description: Option<String>,
+    pub tool_use_id: Option<String>,
+    pub spawn_depth: Option<u32>,
+}
+
+/// What one session file says about who it was, beyond what [`SessionMeta`]
+/// has a field for. See the module doc.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Identity {
+    /// §3.1: the real per-file identity, equal to the filename hex in 604 of
+    /// 604 subagent files. Absent on top-level sessions.
+    pub agent_id: Option<String>,
+    /// §3.1: **not unique across files** — every subagent carries its parent's.
+    /// Keying a map on this merges a session with all of its subagents.
+    pub session_id: Option<String>,
+    /// §4.2: every distinct cwd in the file, most frequent first, ties by first
+    /// appearance. `sessions --repo` must match on *any* of these.
+    pub cwds: Vec<PathBuf>,
+    /// §3.4, the cheap discriminator. `None` for a top-level session or a
+    /// subagent whose sidecar is missing.
+    pub sidecar: Option<Sidecar>,
+}
+
+/// One file, read once: the connector-agnostic metadata plus the
+/// claude_code-specific [`Identity`] the join needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Scan {
+    pub meta: SessionMeta,
+    pub identity: Identity,
 }
 
 pub struct ClaudeCode;
 
 impl Connector for ClaudeCode {
     fn name(&self) -> &'static str {
-        "claude_code"
+        NAME
     }
 
     fn roots(&self) -> Vec<PathBuf> {
-        todo!("recount-hwk.29: vec![projects_root()]")
+        vec![projects_root()]
     }
 
     fn discover(&self, dirs: &[PathBuf], window: &TimeWindow) -> Vec<SessionMeta> {
-        todo!("recount-hwk.29: candidates -> prune -> scan, per format-notes: {dirs:?} {window:?}")
+        let files: Vec<PathBuf> = candidates(dirs)
+            .into_iter()
+            .filter(|p| !is_journal(p))
+            .collect();
+        prune::partition(&files, window)
+            .opened
+            .iter()
+            .map(|path| scan(path).meta)
+            // mtime prunes only the lower bound (see `prune`); once a file is
+            // open its real span is known, so rule out what it now can. A file
+            // with no parsed turns has an unbounded span and survives, which is
+            // what `doctor` wants: its `parse_failures` are the point.
+            .filter(|meta| meta.window().overlaps(window))
+            .collect()
     }
 
     fn read(&self, path: &Path) -> Vec<Turn> {
-        todo!("recount-hwk.29: tolerant per-line parse of {path:?}")
+        pass(path).turns
+    }
+}
+
+/// Read one file and report both what it holds and who it was.
+///
+/// Public because [`Connector::discover`] can only return [`SessionMeta`], and
+/// the join needs the [`Identity`] that does not fit in one.
+pub fn scan(path: &Path) -> Scan {
+    let p = pass(path);
+    // min/max, never first/last: 246 of 842 files contain timestamp
+    // inversions, the worst 12 hours wide (§6.1).
+    let meta = SessionMeta {
+        path: path.to_path_buf(),
+        cwd: p.cwds.first().map(|(c, _)| c.clone()),
+        first_ts: p.turns.iter().map(|t| t.ts).min(),
+        last_ts: p.turns.iter().map(|t| t.ts).max(),
+        turn_count: p.turns.len(),
+        parse_failures: p.failures,
+        connector: NAME.to_string(),
+    };
+    let identity = Identity {
+        agent_id: p.agent_id,
+        session_id: p.session_id,
+        cwds: p.cwds.into_iter().map(|(c, _)| c).collect(),
+        sidecar: sidecar(path),
+    };
+    Scan { meta, identity }
+}
+
+/// The `.meta.json` beside `path`, if there is one (§3.4).
+///
+/// One small file read and no transcript — the cheapest fleet-identity signal
+/// there is. `None` for a top-level session, for a missing sidecar, and for a
+/// sidecar that is not readable JSON: none of those is an error.
+pub fn sidecar(path: &Path) -> Option<Sidecar> {
+    let bytes = fs::read(path.with_extension("meta.json")).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// §2.4: `…/subagents/workflows/wf_*/journal.jsonl` holds `started`/`result`
+/// records with no cwd, no timestamp and no message. It is not a transcript.
+fn is_journal(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| n == "journal.jsonl")
+}
+
+/// One pass over one file. Never fails; an unreadable file is empty.
+#[derive(Default)]
+struct Pass {
+    turns: Vec<Turn>,
+    failures: usize,
+    /// Distinct cwds with their line counts, most frequent first (§4.2).
+    cwds: Vec<(PathBuf, usize)>,
+    agent_id: Option<String>,
+    session_id: Option<String>,
+}
+
+fn pass(path: &Path) -> Pass {
+    let mut out = Pass::default();
+    let Ok(file) = fs::File::open(path) else {
+        return out;
+    };
+    let mut reader = BufReader::new(file);
+    let mut raw = Vec::new();
+    let mut number = 0usize;
+
+    loop {
+        match read_capped(&mut reader, &mut raw) {
+            Read1::End => break,
+            Read1::Oversized => {
+                number += 1;
+                // Content was lost, so this is damage and is tallied. It is
+                // also never testimony: at 8 MB it is a pasted dump (§5).
+                out.failures += 1;
+                continue;
+            }
+            Read1::Line => number += 1,
+        }
+
+        // §7.10: read as bytes, decode lossily. A tool result can carry
+        // arbitrary program output and one bad byte must not cost a file.
+        let text = String::from_utf8_lossy(&raw);
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(text) else {
+            out.failures += 1;
+            continue;
+        };
+        let Some(obj) = value.as_object() else {
+            // Every one of 169,775 lines was a JSON object; a bare scalar or
+            // array is damage, not a line kind.
+            out.failures += 1;
+            continue;
+        };
+
+        // Identity first: these keys ride on lines of several kinds, including
+        // ones that never become turns.
+        if out.agent_id.is_none() {
+            out.agent_id = str_field(obj.get("agentId"));
+        }
+        if out.session_id.is_none() {
+            // §7.1: both spellings occur, same value. Prefer the camelCase one.
+            out.session_id =
+                str_field(obj.get("sessionId")).or_else(|| str_field(obj.get("session_id")));
+        }
+
+        // §7.2: match `type` as a string with a catch-all arm. An unknown kind
+        // — or, unobserved but not impossible, no kind at all — is a skip.
+        let kind = obj.get("type").and_then(Value::as_str).unwrap_or_default();
+        if !matches!(kind, "assistant" | "user" | "attachment" | "system") {
+            continue;
+        }
+
+        // §4.1: cwd is on 100% of these four kinds and 0% of the other fifteen.
+        if let Some(cwd) = str_field(obj.get("cwd")) {
+            count_cwd(&mut out.cwds, PathBuf::from(cwd));
+        }
+        // §2.3, §7.9: injected context, not speech. Its cwd counted above.
+        if kind == "attachment" {
+            continue;
+        }
+
+        // §2: `timestamp` is on 100% of these kinds. One that is missing or
+        // unparseable is damage — a turn with a guessed time could be silently
+        // matched by the join, which is worse than a counted loss.
+        let Some(ts) = str_field(obj.get("timestamp")).and_then(|t| parse_ts(&t).ok()) else {
+            out.failures += 1;
+            continue;
+        };
+
+        let (role, body) = match kind {
+            "assistant" => (Role::Assistant, content_text(obj.get("message"))),
+            "user" => (Role::User, content_text(obj.get("message"))),
+            // §2.2: `system` has no `message`; `subtype` says which hook or
+            // boundary it is, and prose — when there is any — is a top-level
+            // string `content`. 1,618 of 1,963 system lines have none: see the
+            // module doc, and §2 of the notes, which this corrected.
+            _ => match system_text(obj) {
+                Some(body) => (Role::System, body),
+                None => continue,
+            },
+        };
+        out.turns.push(Turn {
+            ts,
+            role,
+            text: body,
+            line: number,
+        });
+    }
+
+    // Most frequent first, ties by first appearance — `sort_by_key` is stable,
+    // so insertion order survives the sort (module doc, §4.2).
+    out.cwds.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    out
+}
+
+/// `.message.content`, which is `String | Vec<Block>` (§2.3).
+fn content_text(message: Option<&Value>) -> String {
+    blocks_text(message.and_then(|m| m.get("content")))
+}
+
+/// The same shape one level down, because `tool_result.content` is also
+/// string-or-array (§2.3).
+fn blocks_text(content: Option<&Value>) -> String {
+    match content {
+        // The human's own typed prompt, 1,977 times. Verbatim, untagged.
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(blocks)) => {
+            let rendered: Vec<String> = blocks
+                .iter()
+                .map(block_text)
+                .filter(|s| !s.is_empty())
+                .collect();
+            rendered.join("\n")
+        }
+        _ => String::new(),
+    }
+}
+
+/// One content block. See the table in the module doc.
+fn block_text(block: &Value) -> String {
+    let kind = block
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match kind {
+        "text" => block
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        // The point of the whole tool. 24,851 blocks of stated reasoning.
+        "thinking" => tagged(
+            "thinking",
+            block.get("thinking").and_then(Value::as_str).unwrap_or(""),
+        ),
+        "tool_use" => {
+            let name = block.get("name").and_then(Value::as_str).unwrap_or("?");
+            // `input` is tool-specific and arbitrary (§2.3); compact JSON keeps
+            // it greppable — a Bash command, an edited path — without pretending
+            // to know its shape.
+            let input = block
+                .get("input")
+                .map(|i| serde_json::to_string(i).unwrap_or_default())
+                .unwrap_or_default();
+            tagged(&format!("tool_use {name}"), &input)
+        }
+        "tool_result" => {
+            let tag = if block.get("is_error").and_then(Value::as_bool) == Some(true) {
+                "tool_result error"
+            } else {
+                "tool_result"
+            };
+            tagged(tag, &blocks_text(block.get("content")))
+        }
+        // Never the bytes.
+        "image" => "[image]".to_string(),
+        // `fallback` already exists and is undocumented (§2.3); the next
+        // unknown block type lands here too, and neither crashes.
+        other => format!("[{}]", if other.is_empty() { "block" } else { other }),
+    }
+}
+
+/// §2.3: `system` lines carry `.subtype` (`turn_duration`, `stop_hook_summary`,
+/// `compact_boundary`, …), and prose in a top-level string `content` — but only
+/// sometimes.
+///
+/// `None` for a system line with no `content`, which is 1,618 of the 1,963 in
+/// the corpus: `turn_duration` (828) carries `durationMs`/`messageCount` and
+/// `stop_hook_summary` (790) carries `hookCount`/`hookInfos`, and neither says
+/// anything a person testified to. The notes' §2 table said `system` carries
+/// `content` as a string full stop; it is true only of `away_summary` (276),
+/// `local_command` (41), `scheduled_task_fire` (14), `compact_boundary` (12),
+/// `model_refusal_fallback` and `informational`. The table has been corrected.
+fn system_text(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    let body = str_field(obj.get("content"))?;
+    Some(match obj.get("subtype").and_then(Value::as_str) {
+        Some(sub) => tagged(&format!("system:{sub}"), &body),
+        None => body,
+    })
+}
+
+fn tagged(tag: &str, body: &str) -> String {
+    if body.is_empty() {
+        format!("[{tag}]")
+    } else {
+        format!("[{tag}]\n{body}")
+    }
+}
+
+/// A field that is a non-empty string. `null` and a wrong type both read as
+/// absent — §2.2's field inventory drifts by producer version, so a key that
+/// is present with the wrong shape is normal, not an error.
+fn str_field(v: Option<&Value>) -> Option<String> {
+    match v.and_then(Value::as_str) {
+        Some(s) if !s.is_empty() => Some(s.to_string()),
+        _ => None,
+    }
+}
+
+/// Increment `cwd`'s tally, appending it if new. At most 9 distinct values were
+/// observed in one file (§4.2), so a linear scan beats a map and keeps
+/// insertion order for the tie-break.
+fn count_cwd(cwds: &mut Vec<(PathBuf, usize)>, cwd: PathBuf) {
+    match cwds.iter_mut().find(|(c, _)| *c == cwd) {
+        Some((_, n)) => *n += 1,
+        None => cwds.push((cwd, 1)),
+    }
+}
+
+enum Read1 {
+    Line,
+    Oversized,
+    End,
+}
+
+/// One line into `buf`, newline included, never allocating past the cap.
+///
+/// An oversized line is drained straight out of the `BufReader` rather than
+/// buffered (§5, §7.5) — a 16.4 MB line exists and holding it would be the
+/// pathology the notes warn about. An I/O error mid-file ends the read with
+/// whatever was already parsed, because "one bad line never fails a file"
+/// makes even less sense as "one bad sector loses the session".
+fn read_capped<R: BufRead>(reader: &mut R, buf: &mut Vec<u8>) -> Read1 {
+    buf.clear();
+    buf.shrink_to(LINE_BUFFER_KEEP);
+    match reader
+        .by_ref()
+        .take(MAX_LINE_BYTES as u64 + 1)
+        .read_until(b'\n', buf)
+    {
+        Ok(0) => return Read1::End,
+        Ok(_) => {}
+        Err(_) => return Read1::End,
+    }
+    if buf.len() <= MAX_LINE_BYTES {
+        return Read1::Line;
+    }
+    if buf.last() != Some(&b'\n') {
+        // Consume the tail of the oversized line without holding any of it.
+        loop {
+            // Decided before consuming, so the `fill_buf` borrow ends first.
+            let (eat, done) = match reader.fill_buf() {
+                Ok(chunk) if !chunk.is_empty() => match chunk.iter().position(|&b| b == b'\n') {
+                    Some(i) => (i + 1, true),
+                    None => (chunk.len(), false),
+                },
+                // EOF, or an I/O error: the line has no end to find.
+                _ => break,
+            };
+            reader.consume(eat);
+            if done {
+                break;
+            }
+        }
+    }
+    Read1::Oversized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tempfile::TempDir;
+
+    /// A fixture tree in both layouts of §0.1, carrying every shape the notes
+    /// found plus the four pathologies they did *not* (§5: zero bad lines, zero
+    /// truncated tails, zero empty files in the wild — the tolerance is
+    /// required by the spec, so nature not supplying a specimen is not an
+    /// excuse for leaving it untested).
+    fn fixture() -> TempDir {
+        let d = tempfile::tempdir().unwrap();
+        let proj = d.path().join("-tmp-repo");
+        let sub = proj.join("11111111-2222-3333-4444-555555555555/subagents");
+        fs::create_dir_all(&sub).unwrap();
+        fs::create_dir_all(sub.join("workflows/wf_1")).unwrap();
+
+        // Layout 1: a top-level session. Bare-string user content (the human's
+        // typed prompt), an assistant array with thinking + text + tool_use, a
+        // user array with a tool_result whose content is an array, a system
+        // line, an attachment (cwd only, no turn), and three metadata kinds
+        // that must be skipped without being called corruption.
+        write(
+            &proj.join("11111111-2222-3333-4444-555555555555.jsonl"),
+            &[
+                r#"{"type":"user","timestamp":"2026-08-19T07:00:00.000Z","cwd":"/tmp/repo","sessionId":"11111111-2222-3333-4444-555555555555","message":{"role":"user","content":"why did you delete it"}}"#,
+                r#"{"type":"mode","mode":"normal","sessionId":"11111111-2222-3333-4444-555555555555"}"#,
+                r#"{"type":"assistant","timestamp":"2026-08-19T07:02:00.000Z","cwd":"/tmp/repo","unknownFieldFromANewerVersion":42,"message":{"role":"assistant","content":[{"type":"thinking","thinking":"the file was generated","signature":"sig"},{"type":"text","text":"It was generated."},{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"rm -f gen.txt"}}]}}"#,
+                r#"{"type":"attachment","timestamp":"2026-08-19T07:02:30.000Z","cwd":"/tmp/repo","attachment":{"type":"hook_success"}}"#,
+                r#"{"type":"user","timestamp":"2026-08-19T07:03:00.000Z","cwd":"/tmp/repo","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","is_error":false,"content":[{"type":"text","text":"ok"},{"type":"image"},{"type":"tool_reference"}]}]},"toolUseResult":{"stdout":"ok"}}"#,
+                r#"{"type":"system","timestamp":"2026-08-19T07:04:00.000Z","cwd":"/tmp/repo","subtype":"away_summary","content":"hook ran"}"#,
+                // A system line with no `content` at all: telemetry, not
+                // testimony, and 1,618 of the 1,963 in the corpus.
+                r#"{"type":"system","timestamp":"2026-08-19T07:04:30.000Z","cwd":"/tmp/repo","subtype":"turn_duration","durationMs":806352,"messageCount":156}"#,
+                // §6.1: timestamps are not monotonic. This one is 12 hours
+                // BEFORE the file's first line and must widen the span.
+                r#"{"type":"assistant","timestamp":"2026-08-18T19:00:00.000Z","cwd":"/tmp/repo","message":{"role":"assistant","content":[{"type":"text","text":"resumed from yesterday"},{"type":"fallback"}]}}"#,
+                r#"{"type":"ai-title","aiTitle":"deleting things"}"#,
+                r#"{"type":"brand-new-kind-from-2027","whatever":true}"#,
+            ],
+        );
+
+        // Layout 2: a subagent, with its sidecar. Carries the PARENT's
+        // sessionId (§3.1) and its own agentId.
+        write(
+            &sub.join("agent-a34d3106441943c34.jsonl"),
+            &[
+                r#"{"type":"user","timestamp":"2026-08-19T07:10:00.000Z","cwd":"/tmp/repo","isSidechain":true,"sessionId":"11111111-2222-3333-4444-555555555555","agentId":"a34d3106441943c34","message":{"role":"user","content":"write the notes"}}"#,
+                r#"{"type":"assistant","timestamp":"2026-08-19T07:11:00.000Z","cwd":"/tmp/repo","agentId":"a34d3106441943c34","message":{"role":"assistant","content":[{"type":"thinking","thinking":"cwd will not name my worktree"}]}}"#,
+            ],
+        );
+        fs::write(
+            sub.join("agent-a34d3106441943c34.meta.json"),
+            r#"{"agentType":"general-purpose","description":"W0 empirical format-notes bead","toolUseId":"toolu_01x","spawnDepth":1,"model":"opus","stoppedByUser":false}"#,
+        )
+        .unwrap();
+
+        // §2.4: not a transcript. discover() must not return it.
+        write(
+            &sub.join("workflows/wf_1/journal.jsonl"),
+            &[
+                r#"{"type":"started","agentId":"wf"}"#,
+                r#"{"type":"result","summary":"did the thing"}"#,
+            ],
+        );
+
+        // §4.2: one file, three cwds — 3 x b, 2 x a, 1 x c. Insertion order
+        // puts `a` first, so a most-frequent rule is distinguishable from a
+        // first-seen one, and the tie-break is exercised by `a` vs `c`. Two of
+        // b's three are kinds that never become turns, which is how a cwd
+        // counted before the skip is told apart from one counted after.
+        let multi: Vec<String> = [
+            ("/tmp/repo/a", "07:20", "user"),
+            ("/tmp/repo/b", "07:21", "user"),
+            ("/tmp/repo/a", "07:22", "user"),
+            ("/tmp/repo/b", "07:23", "attachment"),
+            ("/tmp/repo/c", "07:24", "user"),
+            ("/tmp/repo/b", "07:25", "system"),
+        ]
+        .iter()
+        .map(|(cwd, hm, kind)| {
+            format!(
+                r#"{{"type":"{kind}","timestamp":"2026-08-19T{hm}:00.000Z","cwd":"{cwd}","subtype":"turn_duration","attachment":{{"type":"task_reminder"}},"message":{{"role":"user","content":"x"}}}}"#
+            )
+        })
+        .collect();
+        write(
+            &proj.join("22222222-2222-3333-4444-555555555555.jsonl"),
+            &multi.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+
+        // Damage: garbage, a non-object line, a timeless testimony line, and a
+        // truncated tail (last line cut mid-write) — around two good turns.
+        fs::write(
+            proj.join("33333333-2222-3333-4444-555555555555.jsonl"),
+            concat!(
+                r#"{"type":"user","timestamp":"2026-08-19T07:30:00.000Z","cwd":"/tmp/repo","message":{"role":"user","content":"before"}}"#,
+                "\n",
+                "not json at all\n",
+                "[1,2,3]\n",
+                r#"{"type":"assistant","cwd":"/tmp/repo","message":{"role":"assistant","content":[{"type":"text","text":"no timestamp"}]}}"#,
+                "\n",
+                "\n",
+                r#"{"type":"assistant","timestamp":"2026-08-19T07:31:00.000Z","cwd":"/tmp/repo","message":{"role":"assistant","content":[{"type":"text","text":"after"}]}}"#,
+                "\n",
+                r#"{"type":"user","timestamp":"2026-08-19T07:32:00.000Z","cwd":"/tmp/re"#,
+            ),
+        )
+        .unwrap();
+
+        // Empty file (§5: zero observed, tolerated anyway).
+        fs::write(proj.join("44444444-2222-3333-4444-555555555555.jsonl"), "").unwrap();
+
+        d
+    }
+
+    fn write(path: &Path, lines: &[&str]) {
+        fs::write(path, format!("{}\n", lines.join("\n"))).unwrap();
+    }
+
+    fn project(d: &TempDir) -> Vec<PathBuf> {
+        vec![d.path().join("-tmp-repo")]
+    }
+
+    fn session(d: &TempDir, name: &str) -> PathBuf {
+        d.path().join("-tmp-repo").join(name)
+    }
+
+    #[test]
+    fn roots_is_the_projects_directory_whether_or_not_it_exists() {
+        let root = projects_root();
+        assert_eq!(ClaudeCode.roots(), vec![root.clone()]);
+        assert!(root.ends_with(".claude/projects"), "{}", root.display());
+    }
+
+    /// The block table in the module doc, asserted.
+    #[test]
+    fn turn_text_renders_every_block_type_the_notes_found() {
+        let d = fixture();
+        let turns = ClaudeCode.read(&session(&d, "11111111-2222-3333-4444-555555555555.jsonl"));
+
+        let texts: Vec<&str> = turns.iter().map(|t| t.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                // A bare string is the human's prompt, verbatim and untagged.
+                "why did you delete it",
+                // thinking first and in full, then text, then the tool call.
+                concat!(
+                    "[thinking]\nthe file was generated\n",
+                    "It was generated.\n",
+                    "[tool_use Bash]\n{\"command\":\"rm -f gen.txt\"}"
+                ),
+                // tool_result recursing into an array of blocks.
+                "[tool_result]\nok\n[image]\n[tool_reference]",
+                "[system:away_summary]\nhook ran",
+                // An unknown block type is a marker, not a crash.
+                "resumed from yesterday\n[fallback]",
+            ]
+        );
+        assert_eq!(
+            turns.iter().map(|t| t.role.clone()).collect::<Vec<_>>(),
+            [
+                Role::User,
+                Role::Assistant,
+                Role::User,
+                Role::System,
+                Role::Assistant
+            ]
+        );
+        // 1-based line numbers into the real file: the attachment on line 4,
+        // the contentless `system` on line 7 and the metadata kinds do not
+        // shift them.
+        assert_eq!(
+            turns.iter().map(|t| t.line).collect::<Vec<_>>(),
+            [1, 3, 5, 6, 8]
+        );
+    }
+
+    /// `parse_failures` means damage. Fifteen line kinds, an attachment and a
+    /// kind that does not exist yet are none of them.
+    #[test]
+    fn skipped_line_kinds_are_not_parse_failures() {
+        let d = fixture();
+        let s = scan(&session(&d, "11111111-2222-3333-4444-555555555555.jsonl"));
+        assert_eq!(s.meta.parse_failures, 0, "nothing in that file is damaged");
+        assert_eq!(
+            s.meta.turn_count, 5,
+            "attachment, telemetry `system` and metadata kinds are not turns"
+        );
+    }
+
+    /// §6.1: the last line is 12 hours before the first, and the span says so.
+    #[test]
+    fn span_is_min_and_max_not_first_and_last() {
+        let d = fixture();
+        let s = scan(&session(&d, "11111111-2222-3333-4444-555555555555.jsonl"));
+        assert_eq!(
+            s.meta.first_ts.map(|t| t.to_rfc3339()),
+            Some("2026-08-18T19:00:00+00:00".to_string()),
+            "the inverted line is the earliest turn"
+        );
+        assert_eq!(
+            s.meta.last_ts.map(|t| t.to_rfc3339()),
+            Some("2026-08-19T07:04:00+00:00".to_string())
+        );
+    }
+
+    /// §4.2 and the rule this module picked: most frequent wins, and the whole
+    /// set is surfaced because one value cannot answer `sessions --repo`.
+    #[test]
+    fn multi_cwd_file_resolves_to_the_most_frequent_and_keeps_the_set() {
+        let d = fixture();
+        let s = scan(&session(&d, "22222222-2222-3333-4444-555555555555.jsonl"));
+        assert_eq!(s.meta.cwd, Some(PathBuf::from("/tmp/repo/b")), "3 beats 2");
+        assert_eq!(
+            s.identity.cwds,
+            [
+                PathBuf::from("/tmp/repo/b"),
+                // `a` appears twice and `c` once, so `a` is second on count —
+                // and it would have been FIRST under a first-seen rule, which
+                // is exactly the rule this module did not choose.
+                PathBuf::from("/tmp/repo/a"),
+                PathBuf::from("/tmp/repo/c"),
+            ]
+        );
+        // Two of b's three lines are an attachment and a contentless `system`:
+        // a cwd counts even when its line never becomes a turn (§4.1).
+        assert_eq!(s.meta.turn_count, 4);
+    }
+
+    /// The spec's tolerance contract, on damage nature did not supply.
+    #[test]
+    fn damage_is_counted_and_never_fatal() {
+        let d = fixture();
+        let s = scan(&session(&d, "33333333-2222-3333-4444-555555555555.jsonl"));
+        assert_eq!(
+            ClaudeCode
+                .read(&s.meta.path)
+                .iter()
+                .map(|t| t.text.as_str())
+                .collect::<Vec<_>>(),
+            ["before", "after"],
+            "the good turns on both sides of the damage survive"
+        );
+        // Garbage, a non-object line, a testimony line with no timestamp, and
+        // the truncated tail. The blank line is free.
+        assert_eq!(s.meta.parse_failures, 4);
+        assert_eq!(s.meta.turn_count, 2);
+    }
+
+    #[test]
+    fn an_empty_file_is_a_session_with_nothing_in_it() {
+        let d = fixture();
+        let s = scan(&session(&d, "44444444-2222-3333-4444-555555555555.jsonl"));
+        assert_eq!(s.meta.turn_count, 0);
+        assert_eq!(s.meta.parse_failures, 0);
+        assert_eq!(s.meta.first_ts, None);
+        assert_eq!(s.meta.cwd, None);
+        assert_eq!(s.identity, Identity::default());
+        // A file that does not exist is the same answer, not a panic.
+        let s = scan(&session(&d, "nope.jsonl"));
+        assert_eq!(s.meta.turn_count, 0);
+        assert_eq!(s.meta.parse_failures, 0);
+    }
+
+    /// §3.1 and §3.4: the subagent layout, and the identity signals the join
+    /// needs because `cwd` cannot tell two siblings apart (§4.3).
+    #[test]
+    fn subagent_surfaces_agent_id_and_its_sidecar_description() {
+        let d = fixture();
+        let path = d
+            .path()
+            .join("-tmp-repo/11111111-2222-3333-4444-555555555555/subagents/agent-a34d3106441943c34.jsonl");
+        let s = scan(&path);
+
+        // agentId equals the filename hex in 604 of 604 files.
+        assert_eq!(s.identity.agent_id.as_deref(), Some("a34d3106441943c34"));
+        // ...while sessionId is the PARENT's, shared with the top-level file.
+        assert_eq!(
+            s.identity.session_id,
+            scan(&session(&d, "11111111-2222-3333-4444-555555555555.jsonl"))
+                .identity
+                .session_id,
+            "keying on sessionId would merge a session with its subagents"
+        );
+        let side = s.identity.sidecar.clone().expect("sidecar exists");
+        assert_eq!(
+            side.description.as_deref(),
+            Some("W0 empirical format-notes bead")
+        );
+        assert_eq!(side.agent_type.as_deref(), Some("general-purpose"));
+        assert_eq!(side.spawn_depth, Some(1));
+        // Unknown sidecar keys (`model`, `stoppedByUser`) were ignored, not fatal.
+        assert_eq!(sidecar(&path), s.identity.sidecar);
+        // No sidecar for a top-level session, and that is not an error.
+        assert_eq!(
+            sidecar(&session(&d, "11111111-2222-3333-4444-555555555555.jsonl")),
+            None
+        );
+    }
+
+    /// §5: one 16 MB line exists in the wild. It must cost one tally, not the
+    /// file — and the turns after it are the ones the audit came for.
+    #[test]
+    fn an_oversized_line_is_skipped_not_fatal() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("huge.jsonl");
+        let good = r#"{"type":"user","timestamp":"2026-08-19T07:00:00.000Z","cwd":"/tmp/repo","message":{"role":"user","content":"survivor"}}"#;
+        let huge = format!(
+            r#"{{"type":"user","timestamp":"2026-08-19T07:01:00.000Z","cwd":"/tmp/repo","message":{{"role":"user","content":"{}"}}}}"#,
+            "x".repeat(MAX_LINE_BYTES + 1024)
+        );
+        fs::write(&path, format!("{huge}\n{good}\n{huge}")).unwrap();
+
+        let s = scan(&path);
+        assert_eq!(s.meta.parse_failures, 2, "both oversized lines counted");
+        assert_eq!(s.meta.turn_count, 1);
+        assert_eq!(ClaudeCode.read(&path)[0].text, "survivor");
+        assert_eq!(
+            ClaudeCode.read(&path)[0].line,
+            2,
+            "the oversized line still occupies its line number"
+        );
+    }
+
+    /// Both layouts arrive, `journal.jsonl` does not, and the mtime window is
+    /// honoured. §0.1 and §2.4.
+    #[test]
+    fn discover_finds_both_layouts_and_refuses_the_journal() {
+        let d = fixture();
+        let found = ClaudeCode.discover(&project(&d), &TimeWindow::default());
+        let names: Vec<String> = found
+            .iter()
+            .map(|m| m.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert!(names.contains(&"agent-a34d3106441943c34.jsonl".to_string()));
+        assert!(names.contains(&"11111111-2222-3333-4444-555555555555.jsonl".to_string()));
+        assert!(
+            !names.contains(&"journal.jsonl".to_string()),
+            "§2.4: not a transcript, and it would be a permanent no-cwd report"
+        );
+        assert!(
+            found.iter().all(|m| m.connector == "claude_code"),
+            "every session says who read it"
+        );
+        // The empty file survives discovery: its span is unbounded, and
+        // `doctor` wants to see it.
+        assert_eq!(found.len(), 5, "{names:?}");
+
+        // A `since` past every file's mtime prunes the whole tree unopened —
+        // the structural half of the spec's cheapness argument, exercised
+        // through this connector rather than only in `prune`.
+        let later = TimeWindow {
+            since: crate::model::parse_ts("2099-01-01T00:00:00Z").ok(),
+            until: None,
+        };
+        assert!(ClaudeCode.discover(&project(&d), &later).is_empty());
+
+        // A window inside the corpus: mtime cannot prune (every fixture was
+        // written just now), so the parsed spans do the ruling out.
+        let inside = TimeWindow {
+            since: crate::model::parse_ts("2026-08-19T07:19:00Z").ok(),
+            until: crate::model::parse_ts("2026-08-19T07:26:00Z").ok(),
+        };
+        let names: Vec<String> = ClaudeCode
+            .discover(&project(&d), &inside)
+            .iter()
+            .map(|m| m.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"22222222-2222-3333-4444-555555555555.jsonl".to_string()));
+        assert!(!names.contains(&"11111111-2222-3333-4444-555555555555.jsonl".to_string()));
+
+        // Nothing anywhere near the tree is not a panic.
+        assert!(ClaudeCode
+            .discover(&[d.path().join("nope")], &TimeWindow::default())
+            .is_empty());
+        assert!(ClaudeCode.discover(&[], &TimeWindow::default()).is_empty());
+    }
+
+    /// The notes were measured on this machine, so the connector is checked
+    /// against the same corpus — read-only, and a **skip** (never a failure)
+    /// where `~/.claude/projects` is absent, because CI has no transcripts.
+    #[test]
+    fn reads_the_real_corpus_on_this_machine() {
+        let root = projects_root();
+        if !root.is_dir() {
+            return;
+        }
+        let mut files = candidates(&[root]);
+        files.retain(|p| !is_journal(p));
+        if files.is_empty() {
+            return;
+        }
+
+        // Newest first, so the sample is current-format rather than whatever
+        // sorted first, and bounded so the test stays a test.
+        files.sort_by_key(|p| std::cmp::Reverse(fs::metadata(p).and_then(|m| m.modified()).ok()));
+        files.truncate(40);
+
+        let mut turns_seen = 0usize;
+        let mut thinking_seen = 0usize;
+        let mut with_cwd = 0usize;
+        let mut multi_cwd = 0usize;
+        let mut sidecars = 0usize;
+        for path in &files {
+            let s = scan(path);
+            assert_eq!(s.meta.path, *path);
+            if let (Some(a), Some(b)) = (s.meta.first_ts, s.meta.last_ts) {
+                assert!(a <= b, "min/max inverted in {}", path.display());
+            }
+            assert_eq!(s.meta.turn_count, ClaudeCode.read(path).len());
+            if s.meta.cwd.is_some() {
+                with_cwd += 1;
+                assert_eq!(
+                    s.meta.cwd.as_deref(),
+                    s.identity.cwds.first().map(|p| p.as_path()),
+                    "the summary must be the head of the set"
+                );
+            }
+            if s.identity.cwds.len() > 1 {
+                multi_cwd += 1;
+            }
+            if s.identity.sidecar.is_some() {
+                sidecars += 1;
+                // §3.1: agentId equals the filename hex.
+                let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
+                if let Some(id) = &s.identity.agent_id {
+                    assert_eq!(stem, format!("agent-{id}"), "{}", path.display());
+                }
+            }
+            turns_seen += s.meta.turn_count;
+            thinking_seen += ClaudeCode
+                .read(path)
+                .iter()
+                .filter(|t| t.text.contains("[thinking]"))
+                .count();
+        }
+
+        // The corpus is 87.9% timestamped testimony; a sample of 40 real files
+        // that yields nothing means the parser stopped matching the format.
+        assert!(turns_seen > 0, "40 real files and not one turn parsed");
+        assert!(with_cwd > 0, "§4.1 says cwd is on 100% of testimony lines");
+        // Not asserted, only reported by `cargo test -- --nocapture`: these
+        // vary with what this machine did lately.
+        println!(
+            "real corpus: {} files, {turns_seen} turns, {thinking_seen} with thinking, \
+             {with_cwd} with a cwd, {multi_cwd} multi-cwd, {sidecars} sidecars",
+            files.len()
+        );
     }
 }

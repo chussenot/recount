@@ -139,7 +139,7 @@ which is not a licence to panic on one.
 | `mode` | 4,119 | 2.4% | never | never | no | no |
 | `permission-mode` | 4,065 | 2.4% | never | never | no | no |
 | `ai-title` | 3,684 | 2.2% | never | never | no | title only |
-| `system` | 2,108 | 1.2% | always | always | no (`content` str) | hooks/compaction |
+| `system` | 2,108 | 1.2% | always | always | no (`content` str **on 17% only** — §2.3) | hooks/compaction |
 | `queue-operation` | 2,076 | 1.2% | never | **yes** | no (`content` str) | queued user text |
 | `agent-setting` | 891 | 0.5% | never | never | no | no |
 | `file-history-snapshot` | 858 | 0.5% | never | never | no | no |
@@ -267,6 +267,26 @@ boilerplate.
 `compact_boundary` matters: it has `parentUuid: null` plus
 `logicalParentUuid`, and `compactMetadata` with `preTokens`/`postTokens`. It
 **breaks the uuid chain mid-file**.
+
+> **CORRECTION (2026-08-19, from the `claude_code` connector bead,
+> recount-hwk.29).** The §2 table above said a `system` line carries `content`
+> as a string. **Most do not.** Re-counted over the whole corpus that day:
+> 1,963 `system` lines, of which **345 carry a string `content` and 1,618 carry
+> none at all**. The two commonest subtypes are the ones without it —
+> `turn_duration` (828) carries `durationMs`/`messageCount`/
+> `pendingBackgroundAgentCount`, and `stop_hook_summary` (790) carries
+> `hookCount`/`hookInfos`/`hookErrors`/`stopReason`. Both are telemetry about a
+> turn, not anything anyone said. The subtypes that *do* carry prose are
+> `away_summary` (276), `local_command` (41), `scheduled_task_fire` (14),
+> `compact_boundary` (12), `model_refusal_fallback` (1) and `informational`
+> (1). (The per-subtype totals differ slightly from the line above because the
+> corpus is live and append-only — §0 — and was re-walked a few hours later.)
+>
+> Consequence, implemented in `src/connector/claude_code.rs`: a `system` line
+> is read for its `cwd` and then becomes a turn **only if it has a `content`
+> string**. Emitting the other 82% would put 1,618 empty-bodied turns into
+> every `sessions`/`grep` result, which is the same flooding §2.3 rejects
+> `attachment` lines for.
 
 ### 2.4 `journal.jsonl` is not a transcript
 
@@ -521,6 +541,14 @@ bad line never fails a file". Against the format above that means:
    (last line, parse error) and report it as `truncated_tail: true` rather than
    as a generic bad line, because it is the benign case: the session was killed
    mid-write and the preceding 4,629 lines are perfect.
+   *Not implemented, and the reason is recorded rather than worked around
+   (recount-hwk.29):* `SessionMeta` (`src/model.rs`, another bead) has one
+   `parse_failures: usize` and no `truncated_tail` field, so the connector
+   cannot report the distinction without changing a type it does not own. A
+   truncated tail is therefore exactly **one parse failure, on the last line**.
+   The spec only asks that truncated tails be "counted not fatal", which that
+   satisfies; the benign/damaged distinction is a `SessionMeta` change if
+   anyone ever wants it.
 5. **Cap line length.** 8 MB, skip-and-count above it. 12 real lines exceed
    1 MB and one is 16.4 MB.
 6. **`content` is `String | Vec<Block>`.** An untagged enum, or match on
