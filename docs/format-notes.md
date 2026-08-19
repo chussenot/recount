@@ -1,42 +1,93 @@
 # format-notes: the real `~/.claude` layout, observed
 
-**Observed: 2026-08-19.** Machine: this one — Linux 6.17 (Ubuntu OEM kernel),
-`/home/chussenot`, running the `recount` repo itself. Claude Code versions seen
-in the corpus: 22 distinct, `2.1.215` … `2.1.234`, dominated by `2.1.220`
-(38,797 lines) and `2.1.233` (26,058).
+**Observed: 2026-08-19, in two passes.** Machine: this one — Linux 6.17
+(Ubuntu OEM kernel), `/home/chussenot`, running the `recount` repo itself.
+
+* **Pass A — 2026-08-19 ~07:20 local (wave 0).** The survey this document was
+  written from: 871 `.jsonl` files, 169,775 lines. Every unqualified number
+  below is from pass A.
+* **Pass B — 2026-08-19 ~10:05 local (wave 3).** A re-measurement taken while
+  reconciling these notes against the shipped `claude_code` connector and
+  `recount doctor`. Where B disagrees with A the text says so and dates both.
+  §0 carries the full diff; §5 carries the one that mattered.
+
+Claude Code versions seen in pass A: 22 distinct, `2.1.215` … `2.1.234`,
+dominated by `2.1.220` (38,797 lines) and `2.1.233` (26,058).
 
 > **REVERSE-ENGINEERED, EXPECT DRIFT.** Nothing here comes from a published
 > schema. Every statement below was measured on one machine, on one day, over
 > one corpus. Anthropic changes this format between point releases — the corpus
 > already spans 22 versions and the field sets differ between them (see
-> §3.1). Treat this document as a snapshot to be re-measured, never as a
-> contract. The connector must degrade, not assert. In one phrase: this
-> document is reverse-engineered, expect drift.
+> §2.2). Treat this document as a snapshot to be re-measured, never as a
+> contract. The connector must degrade, not assert. Two passes 2h45m apart on
+> the same machine on that one day already disagree — on the file count, the
+> line count, the field inventory and the earliest timestamp in the corpus
+> (§0, §0.0, §2.2). In one phrase: this document is reverse-engineered, expect
+> drift.
 
 ## 0. The corpus this was measured on
 
-| Thing | Count |
-|---|---|
-| Project directories under `~/.claude/projects/` | 48 |
-| …of which contain at least one `.jsonl` | 43 |
-| `.jsonl` files (all depths) | 871 |
-| …top-level session files (`<project>/<uuid>.jsonl`) | 238 |
-| …subagent files (`<project>/<uuid>/subagents/agent-<hex>.jsonl`) | 604 |
-| …workflow journals (`…/subagents/workflows/wf_<id>/journal.jsonl`) | 29 |
-| `.meta.json` sidecars (one per subagent file) | 604 |
-| Total JSONL lines | 169,775 |
-| Total bytes | 754.7 MB (mean 887 KB/file, max 47.7 MB) |
-| Timestamp range | `2026-07-02T12:33:20.334Z` … `2026-08-19T07:20:00.504Z` |
+**Two denominators, and they are not the same number.** A *file* is any
+`.jsonl` under the root. A *session* is a file the connector will open:
+files **minus** the 29 `journal.jsonl`, which are not transcripts (§2.4).
+`recount doctor` reports sessions. This document's older tables say "871
+files"; `doctor` says "828 sessions"; both were right on their own day and of
+their own thing.
 
-Reproduce: `/tmp/claude-1000/…/scratchpad/scan.py` and `probe.py`,
-`probe2.py` (single-pass Python walks, ~7 s over the whole corpus). Every
-number in this document comes from those passes.
+| Thing | Pass A (07:20) | Pass B (10:05) |
+|---|---:|---:|
+| Project directories under `~/.claude/projects/` | 48 | **41** |
+| …of which contain at least one `.jsonl` | 43 | **36** |
+| `.jsonl` files (all depths) | 871 | **857** |
+| …top-level session files (`<project>/<uuid>.jsonl`) | 238 | **216** |
+| …subagent files (`<project>/<uuid>/subagents/agent-<hex>.jsonl`) | 604 | **612** |
+| …workflow journals (`…/subagents/workflows/wf_<id>/journal.jsonl`) | 29 | 29 |
+| **sessions** = files − journals (what `doctor` counts) | 842 | **828** |
+| `.meta.json` sidecars (one per subagent file) | 604 | **612** |
+| Total JSONL lines | 169,775 | **163,633** |
+| Total bytes | 754.7 MB | **776.8 MB** |
+| Externalised `tool-results/*.txt` | 87 | **91** |
+| Earliest timestamp | `2026-07-02T12:33:20.334Z` | **`2026-07-02T19:39:56.172Z`** |
+| Latest timestamp | `2026-08-19T07:20:00.504Z` | `2026-08-19T08:09:49.625Z` |
 
-Two independent passes minutes apart counted 149,297 then 149,351 timestamped
-lines. The 54-line delta is not an error: the live session file
+Reproduce pass A: `scan.py`, `probe.py`, `probe2.py`. Reproduce pass B:
+`corpus.py` and `failscan.py` (all single-pass Python walks in the session
+scratchpad, ~40 s over the whole corpus). Pass B's session count agrees with
+`recount --json doctor` on the same machine to the file: 828.
+
+### 0.0 The corpus is live in **both** directions — it grows *and* it forgets
+
+Pass A counted 149,297 timestamped lines and, minutes later, 149,351. The
+54-line delta was not an error: the live session file
 `-home-chussenot-Documents-recount/cd7c75eb-….jsonl` grew between the passes.
-**The corpus is live and append-only while you read it.** A reader that stats a
-file and then reads it may see more bytes than it stat'd.
+**A reader that stats a file and then reads it may see more bytes than it
+stat'd.**
+
+Pass B, 2h45m later, found the corpus **smaller**: 14 fewer files, 6,142 fewer
+lines, 22 fewer top-level sessions, seven fewer project directories — while
+subagent files went *up* by 8 (this fleet's own transcripts) and the earliest
+timestamp in the whole corpus moved **forward** by seven hours. The corpus is
+22 MB *larger* over the same interval, which is not a contradiction: the files
+that arrived are this fleet's own transcripts and are far above average size,
+while the ones that left were small and old. Old sessions are being deleted
+underneath you. Every file this document cites by name survived,
+so nothing here went stale, but the counts did.
+
+*Mechanism not proven* (§8): the oldest surviving `.jsonl` mtimes bunch at
+2026-07-20, thirty days before the measurement, which is what Claude Code's own
+`cleanupPeriodDays` retention (default 30) would produce. `recount` itself
+deletes nothing — every `fs::remove_*` and `File::create` in the tree is inside
+`#[cfg(test)]`, against a `tempfile::TempDir`. Verified while writing this.
+
+Consequences, and they are the point of measuring twice:
+
+- **Never cache a scan and trust it.** A path that resolved an hour ago can be
+  gone; `discover()` re-walking every time is correct, not wasteful.
+- **A missing session is normal, not an anomaly.** A pact event that names a
+  session recount can no longer find is an expected `doctor` finding, not
+  corruption — the transcript aged out.
+- **Absence of testimony is not testimony of absence.** `recount` must never
+  say "that agent said nothing"; only "no transcript for it exists today".
 
 ### 0.1 Directory layout, actual
 
@@ -51,7 +102,7 @@ file and then reads it may see more bytes than it stat'd.
         workflows/wf_5b13f9d2-abb/
           agent-<hex>.jsonl                            # subagent spawned inside a workflow
           journal.jsonl                                # NOT a transcript — see §2.4
-      tool-results/bahd13vhz.txt                       # externalised tool output (87 files, up to 120 KB)
+      tool-results/bahd13vhz.txt                       # externalised tool output (87 files at pass A, 91 at pass B; §8.1)
     memory/MEMORY.md                                   # not session data
 ```
 
@@ -196,20 +247,46 @@ one level in:
   is absent on 20% of lines, `type` is present on 100%.
 - **content** → `.message.content`.
 
-Full top-level field inventory seen on `assistant`/`user` lines:
-`parentUuid`, `isSidechain`, `type`, `message`, `uuid`, `timestamp`, `cwd`,
-`sessionId`, `session_id` (yes, both spellings on newer versions, same value),
-`userType`, `entrypoint`, `version`, `gitBranch`, `requestId` (assistant),
-`promptId` (user), `sourceToolAssistantUUID` (user), `toolUseResult` (user),
-`effort` (assistant), `slug`, `sessionKind`, `agentId`, `attributionAgent`,
-`attributionSkill`, `logicalParentUuid` (compaction).
+Full top-level field inventory seen on `assistant`/`user` lines. Pass A found
+24 names; **pass B, on a corpus 4% smaller, found 46** — the extra 23 are not
+new to the format, they are what a second look finds, which is the whole
+argument of this document. Counts are pass B, out of 130,955 `assistant`/`user`
+lines.
 
-Field-set drift within the corpus, for the "expect drift" claim: the single
-most common `assistant` key-set has 16 keys and occurs 27,638 times; the
-second-most-common differs by one key (`slug`) and occurs 17,835 times; a
-third variant swaps `agentId,attributionAgent` for `session_id` (11,894). All
-are the same version family. **Unknown/missing fields are the norm, not an
-anomaly.**
+*On every line (130,955/130,955):* `parentUuid`, `isSidechain`, `type`,
+`message`, `uuid`, `timestamp`, `cwd`, `sessionId`, `userType`, `entrypoint`,
+`version`, `gitBranch`.
+
+*On some:* `agentId` (83,651), `requestId` (82,866, assistant), `effort`
+(81,434, assistant), `attributionAgent` (52,345), `slug` (49,941), `promptId`
+(47,362, user), `sourceToolAssistantUUID` (45,986, user), `session_id` (41,485
+— yes, both spellings, same value), `toolUseResult` (29,427, user),
+`sessionKind` (12,397), `attributionSkill` (2,684), `promptSource` (1,046),
+`permissionMode` (1,044), `attributionMcpServer` / `attributionMcpTool` (1,021
+each), `origin` (922), `attributionPlugin` (413), `toolDenialKind` (363),
+`toolEndsTurn` (227), `isMeta` (184), `classifierMetaLines` (165),
+`isApiErrorMessage` (79), `error` (72), `apiErrorStatus` (68), `mcpMeta` (67),
+`interruptedMessageId` (57), `sourceToolUseID` (43), `imagePasteIds` (18),
+`errorDetails` (15), `queuePriority` (14), `isVisibleInTranscriptOnly` (12),
+`isCompactSummary` (12), `userFeedback` (3), `isAbortedMidStream` (1).
+`logicalParentUuid` rides on `system` compaction lines, not these.
+
+Three of those are worth a reader's attention even though nothing reads them
+today: `isApiErrorMessage`/`error`/`apiErrorStatus` mark an `assistant` line
+that is a **transport error, not the model speaking** (79 lines), and the
+connector emits it as an ordinary assistant turn; `isCompactSummary` (12) is
+the compaction summary that older write-ups called a `summary` *line kind*
+(§2) — it is a flag on a `user` line here, not a kind; `isMeta` (184) marks
+injected rather than typed user text.
+
+Field-set drift within the corpus, for the "expect drift" claim: in pass A the
+single most common `assistant` key-set had 16 keys and occurred 27,638 times;
+the second-most-common differed by one key (`slug`) and occurred 17,835 times;
+a third variant swapped `agentId,attributionAgent` for `session_id` (11,894).
+All were the same version family. Pass B's 23 extra names, found the same day
+on a smaller corpus, make the point harder still. **Unknown/missing fields are
+the norm, not an anomaly. A `deny_unknown_fields` here would have failed on
+23 names in under three hours.**
 
 ### 2.3 Content shape — an array of blocks, almost always
 
@@ -336,6 +413,14 @@ is sufficient — so **don't build it**.
 
 ### 3.4 Fleet-identity fields (the join's best friends)
 
+> **The heading oversells two of them.** `attributionAgent` and
+> `attributionSkill` label the population without discriminating inside it,
+> because a pact fleet is all `general-purpose`; `gitBranch` stays `master` for
+> a `wt/<agent>` worktree. The connector reads neither, on purpose. The signals
+> that actually separate siblings are `agentId`, the sidecar `description` and
+> a transcript mention — §4.3 ranks them, §9.3 argues it out. *Added
+> 2026-08-19 10:05.*
+
 Present on `assistant`/`user` lines in subagent files:
 
 - `attributionAgent` — the subagent type. 13 distinct: `workflow-subagent`
@@ -434,32 +519,115 @@ therefore surface, and the join must use:
 
 ## 5. Pathologies — measured, and mostly absent
 
-Full scan of all 871 files, 169,775 lines:
+Both passes. Pass A: 871 files, 169,775 lines. Pass B: 857 files, 163,633
+lines, re-run with the shipped connector's own rules.
 
-| Pathology | Count | Notes |
-|---|---:|---|
-| Lines that fail `serde_json` / `json.loads` | **0** | |
-| Files whose **last** line is unparseable (truncated tail) | **0** | |
-| Zero-byte files | **0** | |
-| Files with no `cwd` at all | 29 | all `journal.jsonl` (§2.4) |
-| Non-object JSON lines | 0 | every line is a JSON object |
-| Lines missing `type` | 0 | |
-| **Lines over 1 MB** | **31** | |
-| **Largest single line** | **17,185,957 bytes (16.4 MB)** | line 5 of `-home-chussenot/1c27deb2-….jsonl` (and lines 1 and 5 of two sibling files) |
+| Pathology | Pass A | Pass B | Notes |
+|---|---:|---:|---|
+| Lines that fail `serde_json` / `json.loads` | **0** | **0** | not one, in 333,408 lines across two passes |
+| Files whose **last** line is unparseable (truncated tail) | **0** | **0** | |
+| Zero-byte files | **0** | **0** | |
+| Files with no `cwd` at all | 29 | 29 | all `journal.jsonl` (§2.4) |
+| Non-object JSON lines | 0 | 0 | every line is a JSON object |
+| Lines missing `type` | 0 | 0 | |
+| Lines over 1 MB | 31 | 31 | |
+| **Lines over the connector's 8 MB cap** | 12 | **12** | §5.1 — this is every parse failure `doctor` reports |
+| Largest single line | 17,185,957 B (16.4 MB) | 17,185,957 B | lines 1 and 5 of **six** sibling files, not two (pass A undercounted) |
 
-Line length distribution (by digit count): 4,121 lines <10 B, 38,834 <100 B,
-118,203 <1 KB, 8,496 <10 KB, 128 <100 KB, 19 <1 MB, **12 ≥1 MB**.
+Line length distribution, pass B, in real byte ranges — pass A gave these
+buckets by decimal digit count and then labelled them one power of ten low, so
+its "12 ≥1 MB" meant 12 ≥10 MB and its "31 over 1 MB" was the correct figure:
 
-**Truncated tails were not observed. That is not evidence they cannot happen** —
-the corpus contains no session killed mid-write, and one live file was being
-appended to during the scan. Implement the tolerance; just do not expect the
-fixture to occur naturally.
+| Line length | Lines |
+|---|---:|
+| 10–99 B | 3,782 |
+| 100–999 B | 36,094 |
+| 1–9.99 KB | 115,247 |
+| 10–99.9 KB | 8,362 |
+| 100–999 KB | 117 |
+| 1–9.99 MB | 19 |
+| **≥10 MB** | **12** |
 
-The 16 MB line is the real pathology. A reader using a fixed-size buffer, or
-`BufRead::lines()` without a cap, on `-home-chussenot/*.jsonl` will either
-truncate or allocate 16 MB per line. Recount should read with an explicit
-max-line budget (say 8 MB), and **count-and-skip** oversized lines rather than
-buffering them — a 16 MB line is a pasted binary dump, never testimony.
+**Truncated tails were still not observed on the second pass. That is not
+evidence they cannot happen** — the corpus contains no session killed
+mid-write, and a live file was being appended to during both scans. Implement
+the tolerance; just do not expect the fixture to occur naturally.
+
+### 5.1 The 12 parse failures `doctor` reports are one bug in one prompt, on one day
+
+`recount --json doctor`, 2026-08-19 10:05, says:
+
+> `connector claude_code: 12 unparseable lines across 6 of 828 sessions — those
+> transcripts are damaged, not merely skipped`
+
+Pass A said zero bad lines and pass A was right. **All 12 are lines the
+connector refused to read, not lines that failed to parse.** A Python walk
+applying the connector's own rules — 8 MB cap, `json.loads`, object check,
+`timestamp` check on `assistant`/`user`/`system` — reproduces `doctor` exactly:
+12 failures, 6 files, 828 sessions, and every one of the 12 is the **oversized**
+branch. Zero JSON errors, zero non-objects, zero unparseable timestamps.
+
+The six files, all in `~/.claude/projects/-home-chussenot/`, all 14 lines long,
+all created within 6m27s of each other on 2026-08-17:
+
+| Session | First line at | Line 1 | Line 5 |
+|---|---|---:|---:|
+| `8a22db12-…` | 07:05:20.885Z | 17,181,270 B | 17,181,584 B |
+| `1eaed69c-…` | 07:06:03.545Z | 17,181,270 B | 17,181,584 B |
+| `9a5ce2b6-…` | 07:06:46.092Z | 17,181,270 B | 17,181,584 B |
+| `1c27deb2-…` | 07:10:21.007Z | 17,185,643 B | 17,185,957 B |
+| `c80327ba-…` | 07:11:03.746Z | 17,185,643 B | 17,185,957 B |
+| `1b4c58fa-…` | 07:11:47.030Z | 17,185,643 B | 17,185,957 B |
+
+Two big lines per file, and they are the *same* prompt twice: line 1 is a
+`queue-operation` whose `content` holds it, line 5 is the `user` line that
+`queue-operation` became, holding it again as a **bare-string
+`message.content`** (§2.3).
+
+What the prompt is: a small, ordinary instruction — "You are turning a
+machine-generated recap of my Claude Code sessions into a report…" — piped a
+digest on stdin, which **re-quoted itself**. The 9,610,205-character string is
+**78.6% backslashes**; the longest unbroken backslash run is **8,191 = 2¹³−1**,
+i.e. thirteen rounds of escape doubling, and the original instruction text
+appears **142 times** nested inside itself. A shell/JSON quoting layer fed its
+own output back in.
+
+Claude Code wrote it down faithfully. The API refused it: each of the six files
+ends with an `assistant` line carrying `isApiErrorMessage: true`,
+`error: "invalid_request"`, `apiErrorStatus: 400`, `message.model:
+"<synthetic>"` and the text
+
+> `Prompt is too long · the request is ~8391167 tokens (limit 1000000)…`
+
+Six sessions in six and a half minutes is a human (or a wrapper script)
+retrying.
+
+**Three things follow, and the third is a defect.**
+
+1. **The 8 MB cap is right and the notes' old justification for it was wrong.**
+   Pass A wrote "a 16 MB line is a pasted binary dump, never testimony". It is
+   not a binary dump. It is **the human's own prompt** — the bare-string user
+   content §2.3 calls "precisely the testimony recount exists to find" — and it
+   is the single most audit-worthy line in the corpus, because it is a
+   reproducible failure with the error message attached. Still skip it: 9.6 MB
+   of backslashes helps nobody and holding it costs 16 MB. But skip it knowing
+   what is being dropped. *If the cap ever needs a better answer than "drop",
+   the answer is a truncated excerpt with a marker, not a bigger buffer.*
+2. **`parse_failures` is a lossy channel and this is the proof.** §7.4 already
+   records that a truncated tail and real damage are indistinguishable through
+   one `usize`. Add a third member: **a line the reader declined to read.**
+   Nothing in the corpus is damaged; the number 12 is a fact about recount's
+   configuration, not about `~/.claude`.
+3. **`doctor`'s wording is therefore wrong, and it is the user-visible half.**
+   "12 unparseable lines … those transcripts are damaged, not merely skipped"
+   is false on all three counts: the lines parse, the transcripts are
+   byte-perfect JSON, and skipping is exactly what happened. A user shown that
+   finding will go looking for corruption that does not exist. The honest
+   finding is *"12 lines over the 8 MB read cap in 6 of 828 sessions — recount
+   declined to read them; the files themselves are intact"*, which needs
+   `SessionMeta` to separate "declined" from "damaged" (§7.4) and is a
+   `doctor`/`model` change, not a notes change. **Recorded here rather than
+   worked around.**
 
 ---
 
@@ -549,8 +717,19 @@ bad line never fails a file". Against the format above that means:
    The spec only asks that truncated tails be "counted not fatal", which that
    satisfies; the benign/damaged distinction is a `SessionMeta` change if
    anyone ever wants it.
-5. **Cap line length.** 8 MB, skip-and-count above it. 12 real lines exceed
-   1 MB and one is 16.4 MB.
+   *And there is a third case, measured in §5.1 and not hypothetical:* a line
+   **over the 8 MB cap** is also one `parse_failure`. On this machine that is
+   **all 12 of them** — every failure `doctor` reports is a line recount
+   declined to read, in a file with nothing wrong with it. So one `usize`
+   currently conflates damage, a benign truncated tail, and recount's own
+   configuration, and `doctor` reports the union as "damaged". If any of the
+   three is ever worth acting on differently, this is the field that has to
+   grow.
+5. **Cap line length.** 8 MB, skip-and-count above it. **31** real lines
+   exceed 1 MB; **12** exceed 10 MB and all 12 are over the cap; the largest is
+   16.4 MB. Those 12 are not binary dumps — they are one runaway prompt,
+   retried six times (§5.1) — so count them somewhere a human can tell "we
+   didn't read this" from "this is broken".
 6. **`content` is `String | Vec<Block>`.** An untagged enum, or match on
    `Value::String` vs `Value::Array`. Same again one level down for
    `tool_result.content`.
@@ -572,7 +751,10 @@ bad line never fails a file". Against the format above that means:
 
 ## 8. What I could NOT determine
 
-Flagged so the `claude_code` connector bead knows where it is guessing:
+Flagged so the `claude_code` connector bead knows where it is guessing.
+**Updated 2026-08-19 10:05** after the connector and `doctor` shipped: two
+entries moved to §8.1 because they are now determined, and three were added
+that only building the thing could reveal.
 
 - **How non-ASCII path characters encode.** Every path on this machine is
   ASCII. Whether `é` becomes one `-` or two (per byte) is unknown. *Guess:*
@@ -597,10 +779,118 @@ Flagged so the `claude_code` connector bead knows where it is guessing:
   Read them, store them if free, key nothing on them.
 - **Whether `.meta.json` is always written** — 604/604 here, but a subagent
   killed before its sidecar is flushed is plausible. Treat as optional.
-- **`~/.claude/projects/*/…/tool-results/*.txt`** — 87 externalised tool
-  outputs, referenced from transcripts by an opaque id (`bahd13vhz`). I did not
-  determine which field points at them. If `grep` is expected to find text that
-  only lives in those files, that is unimplemented and unmeasured. *Recommend
-  scoping it out explicitly in the README.*
 - **`~/.claude` outside `projects/`** (`history.jsonl`, `shell-snapshots/`,
   `todos/`, per-project `memory/`) — out of scope for this bead and not examined.
+
+New, from building the connector and `doctor` (waves 2–3):
+
+- **Why the corpus shrinks** (§0.0). 22 top-level sessions and seven project
+  directories vanished between two passes 2h45m apart. The surviving mtimes
+  bunch at the 30-day mark, which points at Claude Code's own
+  `cleanupPeriodDays` retention, but no setting is written in
+  `~/.claude/settings.json` on this machine and I did not watch a deletion
+  happen. **Assume sessions expire; do not assume when.**
+- **Whether the 23 top-level field names pass B found (§2.2) are new to the
+  format or merely unsampled by pass A.** Both passes ran the same day on
+  overlapping corpora, which argues "unsampled" — pass A read a rarer slice, not
+  an older format. Either way the lesson is the same and it is already in §7.1.
+- **Whether any line over the 8 MB cap has ever been worth reading.** Twelve
+  exist and all twelve are one runaway prompt (§5.1). One specimen is not a
+  distribution. If a second kind ever shows up, the cap needs an excerpt, not a
+  higher number.
+- **What `parse_failures > 0` should mean to a human.** Today it fuses damage,
+  a benign truncated tail, and "recount declined to read this" into one
+  `usize`, and on this machine it is 100% the third (§5.1, §7.4). Unresolved by
+  design, recorded so nobody re-derives it.
+
+### 8.1 Determined since pass A — removed from the list above
+
+- **~~Which field points at `tool-results/*.txt`~~ — determined 2026-08-19.**
+  **No field does.** The path is prose inside the `tool_result` block's own
+  text, and duplicated in the top-level `toolUseResult` string:
+  `"Error: result (50,131 characters across 6 lines) exceeds maximum allowed
+  tokens. Output has been saved to /home/chussenot/.claude/projects/<encoded>/
+  <session>/tool-results/<id>.txt."` Two id styles, 91 files at
+  pass B and 87 at pass A: 79 opaque nine-character ones (`bw1n34x04.txt`) and
+  12 self-describing MCP ones, `mcp-<server>-<tool>-<epoch-millis>.txt`, e.g.
+  `mcp-datadog-search_datadog_metrics-1784535745222.txt`. So a reader *can* find them by regex on the tool_result text,
+  and `recount grep` will match that sentence but not the file's contents. The
+  README should still scope the file contents out explicitly — but "we don't
+  know how to find them" is no longer the reason.
+- **~~Whether a `system` line always carries a string `content`~~ — determined
+  2026-08-19, and it does not.** See the correction in §2.3: 1,618 of 1,963
+  carry none. Folded into the table there.
+
+---
+
+## 9. Field ledger: what the connector reads, and what it deliberately does not
+
+Added 2026-08-19 10:05, cross-checked line by line against
+`src/connector/claude_code.rs` in **both** directions. The rule this table
+enforces: *every field the connector reads is documented above, and every field
+documented above is either read or listed here with the reason it is not.*
+Result of the check: **no field is read that this document does not describe.**
+The gaps all run the other way, and two of them are worth an argument.
+
+### 9.1 Read
+
+| Field | Where it is read | Becomes | §|
+|---|---|---|---|
+| `type` (top level) | kind switch; anything but `assistant`/`user`/`attachment`/`system` is skipped **without** being tallied | the line's fate | §2 |
+| `cwd` | tallied per distinct value, most-frequent-first | `SessionMeta.cwd` + `Identity.cwds` | §4.1, §4.2 |
+| `timestamp` | on a line that would become a turn; missing or unparseable is a counted failure | `Turn.ts` | §2.2, §6.1 |
+| `sessionId`, then `session_id` | first non-empty on any line | `Identity.session_id` | §3.1, §7.1 |
+| `agentId` | first non-empty on any line | `Identity.agent_id` | §3.1, §3.4 |
+| `message.content` | `assistant`, `user` | `Turn.text` | §2.2, §2.3 |
+| `content` (top level, string) | `system` only; **absent ⇒ no turn at all** | `Turn.text` | §2.3 |
+| `subtype` | `system` only | the `[system:<subtype>]` tag | §2.3 |
+| block `.type` | every block | which renderer | §2.3 |
+| block `.text` / `.thinking` | `text`, `thinking` | verbatim body | §2.3 |
+| block `.name` / `.input` | `tool_use` | `[tool_use <name>]` + compact JSON | §2.3 |
+| block `.is_error` / `.content` | `tool_result`, recursing one level | `[tool_result]` / `[tool_result error]` | §2.3 |
+| sidecar `agentType`, `description`, `toolUseId`, `spawnDepth` | `agent-<hex>.meta.json` | `Identity.sidecar` | §3.4 |
+
+### 9.2 Not read, on purpose
+
+| Field | Why not |
+|---|---|
+| `message.role` | §2.2: agrees with `.type` on all 130,955 lines, and `type` is on 100% of lines where `message` is on 80%. Redundant. |
+| `uuid`, `parentUuid`, `logicalParentUuid` | §3.3: the chain has multiple roots and recount does not need it — file order is sufficient. **Don't build it.** |
+| `isSidechain` | §3.2: exactly equivalent to "the path contains `/subagents/`", which is free. |
+| `attachment.*` | §2.3, §7.9: read for `cwd`, then skipped. Its 23 subtypes only sub-classify boilerplate. |
+| `toolUseResult` | §2.3: redundant with the `tool_result` block, shape varies per tool. |
+| `queue-operation.content` | Queued user text with a `timestamp` but **no `cwd`**, so it can never take part in a topological join. (It is also where half the oversized lines live — §5.1.) |
+| `compactMetadata`, `preTokens`, `postTokens` | Compaction telemetry, nobody's testimony. |
+| `aiTitle`, `agentName`, `agentSetting`, `mode`, `permissionMode`, `atis`, `frame-link`, `file-history-*`, `last-prompt` | §2.1: whole kinds skipped. No `cwd`, no `timestamp`, not in the uuid chain. |
+| `thinking.signature`, `tool_use.id`, `tool_result.tool_use_id` | Identifiers for pairing blocks; recount renders turns and never pairs them. |
+| `slug` | §3.4, §8: five samples, meaning unknown. Keying anything on it would be a guess. |
+| `effort`, `version`, `entrypoint`, `userType`, `sessionKind`, `promptId`, `requestId`, `sourceToolAssistantUUID`, and all 23 names pass B added in §2.2 | §8: "read them, store them if free, key nothing on them". Nothing is free here — `SessionMeta` and `Identity` have no field for them and no caller wants one. Adding a field per name would be inventing a schema for a format that changes between point releases. |
+| sidecar `model`, `stoppedByUser` | Observed (§3.4) but absent from the `Sidecar` struct. Serde ignores them, which is the correct outcome; add them the day something reads them. |
+
+### 9.3 Not read, and it is arguable — two entries
+
+These two are documented above in flattering terms and the connector reads
+neither. The code is defensible; the *notes* were overstated, and this is
+written down rather than quietly fixed in one direction.
+
+**`attributionAgent` (52,345 lines) and `attributionSkill` (2,684).** §3.4
+titles them "the join's best friends". They are not. For the fleet recount was
+built to audit, every agent is spawned `general-purpose`, so `attributionAgent`
+labels the population without discriminating inside it — which is precisely the
+question the join asks. §4.3 already gets this right and ranks the signals that
+work: `agentId`, the sidecar `description`, and a transcript mention. Those are
+exactly the three the connector reads. **Read §3.4's heading as "the fields you
+would reach for first, and be wrong".** They remain a good *label* for output —
+"this was an `Explore` subagent" — and if `sessions` ever prints one, this is
+where it lives.
+
+**`gitBranch` (100% of lines), `worktree-state.worktreePath` / `worktreeName` /
+`worktreeBranch` (212 lines), `relocated.relocatedCwd` (205).** §4.3 signals 2
+and 3, and it calls them *authoritative when present*. They are — for Claude
+Code's own `/worktree` feature, which relocates the process `cwd` and writes
+these records. They never appear for a pact `wt/<agent>` worktree, where the
+agent `cd`s inside `Bash` and the process cwd never moves, so the connector
+surfaces none of them and says so in its module doc. **This is a real
+capability gap, not a nothing:** a fleet that used Claude Code's native
+worktrees would be joinable exactly and precisely, and recount would miss it.
+The 417 lines are here whenever that is worth the field on `Identity`.
