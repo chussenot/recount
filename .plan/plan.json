@@ -1,1 +1,394 @@
-[{"key":"skeleton","acceptance":"`cargo build` and `cargo clippy -- -D warnings` are green on a tree where every module named in the plan exists with its real public signature and a `todo!()` body. The five subcommands of the spec's \"Commands (all --json; human digest second)\" section parse their full flag surface (--repo, --since, --until, --agent, --ts, --window, --event-line, --json) and exit 2 unimplemented. NO later bead may add a `mod` declaration or a clap subcommand: this bead is the seam, so every W1-W3 bead edits exactly one file nobody else owns.\n\nFolded in from the former model bead: SessionMeta, Turn, Role and a time-window type exist in src/model.rs with serde derives, satisfying the spec's \"discover() -> Vec<SessionMeta>, read(path) -> Vec<Turn>\". SessionMeta carries at minimum path, cwd, first_ts, last_ts, turn_count, parse_failures. A Confidence+Evidence pair exists for \"Scored match that always reports confidence and evidence, never a bare answer\". Module doc records why cwd is an Option (a session may never state one) and why timestamps are chrono DateTime<Utc>. A unit test round-trips each type through serde_json. These types are REAL here, not todo!() — every other bead compiles against them.","title":"skeleton: a module tree and CLI surface that compiles before anyone fills it in","files":["src/main.rs","src/cli.rs","src/model.rs","src/connector/mod.rs","src/connector/claude_code.rs","src/connector/generic_jsonl.rs","src/pact_events.rs","src/worktree.rs","src/join.rs","src/prune.rs","src/cmd/mod.rs","src/cmd/sessions.rs","src/cmd/at.rs","src/cmd/grep.rs","src/cmd/explain.rs","src/cmd/doctor.rs"],"deps":[],"spec":"Commands (all --json; human digest second) — sessions / at / grep / explain / doctor","wave":0},{"key":"connector","acceptance":"A `Connector` trait with exactly `discover()` and `read(path)` per the spec line, plus a `roots()` for `doctor`. Registry returns the two connectors and NO more — the module doc quotes \"exactly two\" and \"but do not add one\" as the reason there is no plugin mechanism. Errors are per-file, never fatal: the trait's contract for \"one bad line never fails a file\" is stated here and enforced by the return types.","title":"connector: the two-method trait and the roots it discovers","files":["src/connector/mod.rs"],"deps":["skeleton"],"spec":"Connector trait (discover() -> Vec<SessionMeta>, read(path) -> Vec<Turn>) so a third is one file — but do not add one.","wave":1},{"key":"formatnotes","acceptance":"docs/format-notes.md describes the ACTUAL layout under ~/.claude/projects on this machine: the directory-name encoding of a project path (derived from real examples, including at least one worktree path), the JSONL line kinds actually present with their observed frequency, which fields carry cwd, timestamp, role and content, and which lines carry none. Carries the observation date (2026-08-19) and a \"reverse-engineered, expect drift\" warning verbatim. Documents observed pathologies: truncated tails, non-JSON lines, sessions with no cwd. Cites file paths and line counts as evidence. THIS BEAD BLOCKS claude_code — the connector implements these notes, not guesses.","title":"format-notes: the real ~/.claude layout on THIS machine, observed not guessed","files":["docs/format-notes.md"],"deps":[],"spec":"Discover the real layout EMPIRICALLY on this machine before coding; document the observed schema in docs/format-notes.md with the date and a \"reverse-engineered, expect drift\" warning.","wave":0},{"key":"generic","acceptance":"Reads any directory of *.jsonl accepting either key of each pair the spec names: {ts|timestamp, role, content|text}. Module doc says \"best-effort\" and lists what it will not do. Unknown fields ignored; a bad line increments parse_failures and is skipped. Tests cover: both key spellings, a garbage line mid-file, a truncated last line, an empty file.","title":"generic_jsonl: best-effort reader for any dir of transcript jsonl","files":["src/connector/generic_jsonl.rs"],"deps":["skeleton"],"spec":"generic_jsonl: any dir of *.jsonl with {ts|timestamp, role, content|text}; documented best-effort.","wave":1},{"key":"pactevents","acceptance":"Parses .pact/events.jsonl into events carrying the spec's named fields: agent, at, path, invoked_from, detail. chain_hash is explicitly ignored — the module doc says why (verifying it would make recount a second pact). Unknown fields ignored, bad lines counted not fatal. 1-based line addressing so `explain --event-line N` is unambiguous; the doc states the base. Tested against THIS repo's own .pact/events.jsonl and against a truncated copy.","title":"pact_events: tolerant reader for .pact/events.jsonl","files":["src/pact_events.rs"],"deps":["skeleton"],"spec":"recount reads .pact/events.jsonl directly (tolerant, chain_hash ignored); the dependency is one-way — pact never learns recount exists.","wave":1},{"key":"ci","acceptance":"One workflow running `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` — the spec's \"clippy -D warnings, fmt\" house rule, enforced rather than hoped for. Cached, single job, no matrix (no network, no cross-platform claims to keep). Adds a file-length check that warns above 800 lines, citing the spec's \"~200-800 lines\" rule.","title":"ci: fmt, clippy -D warnings, test on every push","files":[".github/workflows/ci.yml","rustfmt.toml"],"deps":[],"spec":"House rules: clippy -D warnings, fmt, module docs that carry decisions, files sized ~200-800 lines (the lease/context/diff unit).","wave":0},{"key":"claudecode","acceptance":"Implements exactly what docs/format-notes.md observed — every field access cites a notes section, and any divergence is a change to the notes first. Honours the spec's tolerance contract: \"unknown fields ignored, truncated tails counted not fatal, one bad line never fails a file\". Reads real sessions from this machine in a test that skips (not fails) when ~/.claude/projects is absent. Reads the fixture tree unconditionally.","title":"claude_code: the connector that implements format-notes","files":["src/connector/claude_code.rs","src/worktree.rs"],"deps":["connector","formatnotes"],"spec":"claude_code: sessions under ~/.claude/projects/<encoded-path>/*.jsonl ... Tolerant parsing: unknown fields ignored, truncated tails counted not fatal, one bad line never fails a file.","wave":2},{"key":"worktree","acceptance":"Given --repo, enumerates the repo and its `git worktree list` worktrees and maps each to its encoded ~/.claude/projects directory, per the encoding documented in format-notes.md — the spec's \"before any file opens\" is the test: no session file is opened during resolution. Reports worktree paths that no longer exist on disk (the pruned-worktree case `at` must refuse on) rather than silently dropping them. Also resolves the reverse direction, session cwd -> which worktree, for the join. Tests: a repo with worktrees, a repo with none, a repo whose worktree was pruned, a --repo that is not a git repo.","title":"worktree: repo path to the set of encoded session directories","files":["src/worktree.rs"],"deps":["skeleton"],"spec":"--repo resolves to the project's encoded session directories (repo + worktrees) before any file opens","wave":1},{"key":"join","acceptance":"Scores (event, session) pairs on exactly the three signals the spec names, in that precedence: the topological chain invoked_from -> worktree path -> session cwd; REQUIRED time-window overlap (no overlap = no match, never a low score); transcript-mention tiebreaker on PACT_AGENT name or bead id. Every result carries confidence AND the evidence that produced it — there is no code path returning a bare answer. Distinguishes the two refusal reasons the `at` command must print: no cwd match vs no overlap. Unit tests pin each signal in isolation and the two refusals.","title":"join: topological scoring that always shows its evidence","files":["src/join.rs"],"deps":["pactevents","worktree"],"spec":"Join key is TOPOLOGICAL: invoked_from -> worktree path -> session cwd, plus required time-window overlap, plus a transcript-mention tiebreaker (PACT_AGENT name or bead id). Scored match that always reports confidence and evidence, never a bare answer.","wave":2},{"key":"prune","acceptance":"Given a time window, partitions candidate session files into opened and skipped using mtime alone, exploiting the spec's stated invariant that \"sessions are append-only\". A file whose mtime precedes the window start cannot contain a turn inside the window and is skipped UNOPENED — the test proves it by counting opens, not by timing. States the one-sided nature of the argument in the module doc: mtime bounds the last turn, never the first, so the lower bound prunes and the upper bound does not. No window = no pruning.","title":"prune: mtime windowing that never opens a file it can skip","files":["src/prune.rs"],"deps":["skeleton"],"spec":"sessions are append-only, so mtime prunes files outside the query window unopened","wave":1},{"key":"cmdsessions","acceptance":"Prints exactly the spec's contract: \"sessions whose cwd resolves into the repo or its worktrees, fleet-identity guesses attached\", honouring --since/--until through prune. --json first and a human digest second, as the Commands section requires of every command. A repo with no sessions prints an empty list and exits 0 — not an error.","title":"sessions: list the transcripts that belong to a repo","files":["src/cmd/sessions.rs","src/connector/generic_jsonl.rs"],"deps":["connector","worktree","prune"],"spec":"recount sessions --repo <p> [--since --until] : sessions whose cwd resolves into the repo or its worktrees, fleet-identity guesses attached.","wave":2},{"key":"cmdgrep","acceptance":"Emits precisely the spec's five-tuple per hit: (session, line, ts, role, snippet). Matching is case-insensitive substring and NOTHING else — the module doc quotes the refusal \"no fuzzy search (case-insensitive substring only)\" as the reason there is no regex flag. Honours --agent/--since/--until. --json plus human digest.","title":"grep: case-insensitive substring hits with their coordinates","files":["src/cmd/grep.rs"],"deps":["cmdsessions","prune","connector","integration"],"spec":"recount grep <needle> --repo <p> [--agent --since --until] : (session, line, ts, role, snippet) hits.","wave":4},{"key":"cmdat","acceptance":"Exit 0 on a confident match with the transcript window printed; exit 1 on no-confident-match, and the output names WHICH of the spec's two reasons applies — \"no cwd match\" or \"no overlap\". Never exits 1 silently and never exits 0 on a bare answer: confidence and evidence are in both the JSON and the digest. --window defaults to 5m and parses the same duration spellings as pact.","title":"at: the session driving an identity at a moment, or a reasoned refusal","files":["src/cmd/at.rs"],"deps":["join","cmdsessions","integration"],"spec":"recount at --repo <p> --agent <name> --ts <rfc3339> [--window 5m] : resolve the session driving that identity at that moment; print the transcript window. Exit 0 found / 1 no-confident-match with the reason (no cwd match vs no overlap).","wave":4},{"key":"cmdexplain","acceptance":"Reads event N (1-based, per pact_events) from .pact/events.jsonl, derives agent and ts from it and runs the same code path as `at` — literally calls it, does not reimplement the join. Inherits `at`'s exit codes and refusal reasons. An out-of-range N is a clean error naming the line count, not a panic. Demonstrated end to end against THIS repo's own .pact/events.jsonl.","title":"explain: one command from an audit finding to the agent's own words","files":["src/cmd/explain.rs"],"deps":["pactevents","cmdat","join"],"spec":"recount explain --repo <p> --event-line <N> : read event N from .pact/events.jsonl, run `at` on it — one command from finding to testimony.","wave":5},{"key":"cmddoctor","acceptance":"Reports each of the four things the spec names: connector roots, session counts, parse-failure tallies, and join-readiness answering both of its questions — events present? worktree paths alive? Runs to completion and exits 0 in a bare directory with none of them, degrading calmly per the proof obligation \"calm degradation, never a panic\". --json plus human digest.","title":"doctor: is a join even possible here, and why not","files":["src/cmd/doctor.rs"],"deps":["connector","pactevents","worktree"],"spec":"recount doctor : connector roots, session counts, parse-failure tallies, join-readiness (events present? worktree paths alive?).","wave":2},{"key":"fixtures","acceptance":"A committed fixture ~/.claude tree and a fixture events.jsonl with a join that is known by construction. Three tests, each named for its obligation: `at` FINDS the known join; `at` REFUSES with exit 1 and the correct reason once the worktree is pruned; truncated and garbage fixtures are counted, not fatal. Fixtures are small and readable — a human can verify the expected join by eye.","title":"fixtures: a known join, and the pruned worktree it must refuse","files":["tests/common/mod.rs","tests/fixtures/","tests/join_fixture.rs"],"deps":["join","cmdat","claudecode"],"spec":"Fixture ~/.claude tree + fixture events.jsonl with a KNOWN join: `at` finds it, and correctly refuses (exit 1 + reason) when the worktree is pruned. Truncated/garbage fixtures.","wave":5},{"key":"degradation","acceptance":"Runs EVERY one of the five commands against a real bare tempdir holding a .pact/events.jsonl and no sessions whatsoever. Asserts no panic, an exit code that is 0 or 1 by the command's documented contract (never 101), and a message a human can act on. The spec's parenthetical is the rationale in the test module doc: \"recount will often run where transcripts don't exist\".","title":"degradation: every command against events with no sessions","files":["tests/degradation.rs"],"deps":["cmdsessions","cmdat","cmdgrep","cmdexplain","cmddoctor"],"spec":"Integration: run every command against a repo with events but NO sessions — calm degradation, never a panic (recount will often run where transcripts don't exist).","wave":6},{"key":"bench","acceptance":"Two measurements against the spec's two ceilings: a pruned `at` under 100ms, and an unwindowed grep over 500 synthetic sessions totalling ~200MB under 2s. The corpus is generated into a tempdir at run time and deleted — 200MB is not committed. Marked #[ignore] so CI stays fast, with the exact command to run it in the module doc, and it prints the achieved numbers so the README's deferral trigger (\"iff real windowed queries exceed ~2s\") can be evaluated against evidence.","title":"bench: the two numbers the spec puts a ceiling on","files":["tests/bench.rs"],"deps":["prune","cmdat","cmdgrep"],"spec":"Bench: pruned `at` <100ms; unwindowed grep over 500 synthetic sessions (~200MB) <2s.","wave":5},{"key":"notespolish","acceptance":"Reconciles the notes with everything the claude_code connector and `doctor` actually hit in W2-W3: every field the connector reads is documented, every documented field is read or marked unused-on-purpose, and every pathology the parse-failure tallies surfaced is listed. Date and the \"reverse-engineered, expect drift\" warning still present and still accurate.","title":"format-notes: polish the observations against what the connector learned","files":["docs/format-notes.md"],"deps":["claudecode","cmddoctor"],"spec":"document the observed schema in docs/format-notes.md with the date and a \"reverse-engineered, expect drift\" warning.","wave":3},{"key":"worked","acceptance":"A transcript of `recount explain --repo . --event-line N` run for real against THIS repo's own .pact/events.jsonl, with the actual transcript window pasted in if this machine has the sessions, and the fixture replay if it does not — the spec's \"if present, else the fixture\" branch is stated explicitly, and which branch was taken is recorded. Shows the confidence and evidence, not just the answer.","title":"worked-example: recount's first testimony is about its own birth","files":["docs/worked-example.md"],"deps":["cmdexplain","cmdat","claimfix"],"spec":"one worked example replaying a real past finding from this machine's history if present, else the fixture.","wave":7},{"key":"readme","acceptance":"Carries the spec's refusals section with its intent intact — no TUI, no daemon, no network, no embeddings, no fuzzy search, one connector family, and NO PERSISTENCE with the reason \"recount owns no store that can drift from sources it does not own\". Credits cass (Dicklesworthstone/coding_agent_session_search) as the product-scale proof of the idea recount takes 3% of. Records the sidecar-manifest deferral with its exact trigger — \"iff real windowed queries exceed ~2s on a real corpus — never a content index, never a database\" — and the bench numbers actually measured. Links the worked example.","title":"README: the refusals are the feature","files":["README.md"],"deps":["worked","notespolish","cmddoctor","bench","degradation","grepperf"],"spec":"Docs: README (incl. the refusals section and the cass credit), format-notes.md, and one worked example","wave":8},{"key":"integration","title":"integration: make the connectors and the commands agree","files":["src/connector/mod.rs","src/cmd/doctor.rs","src/cmd/sessions.rs",".github/workflows/ci.yml"],"deps":["cmdsessions","cmddoctor","claudecode","connector"],"spec":"Connectors (exactly two) ... Commands (all --json; human digest second)","acceptance":"see bead notes","wave":3},{"key":"honesty","title":"honesty: a line we declined is not a line that was damaged","files":["src/model.rs","src/connector/claude_code.rs","src/connector/generic_jsonl.rs","src/cmd/doctor.rs","src/cmd/sessions.rs"],"deps":["integration","notespolish","claudecode","generic","cmdsessions","cmddoctor"],"spec":"recount doctor : ... parse-failure tallies","acceptance":"see bead","wave":4},{"key":"claimfix","title":"claim: a file its connector understood must not fall through to the fallback","files":["src/connector/mod.rs","src/connector/claude_code.rs","src/connector/generic_jsonl.rs"],"deps":["integration","honesty","fixtures","claudecode","generic"],"spec":"Connectors (exactly two)","acceptance":"see bead","wave":6},{"key":"grepperf","title":"grep: parse the corpus once, not twice","files":["src/cmd/grep.rs"],"deps":["bench","cmdgrep","claimfix"],"spec":"Bench: ... unwindowed grep over 500 synthetic sessions (~200MB) <2s","acceptance":"see bead","wave":7}]
+[
+  {
+    "key": "skeleton",
+    "acceptance": "`cargo build` and `cargo clippy -- -D warnings` are green on a tree where every module named in the plan exists with its real public signature and a `todo!()` body. The five subcommands of the spec's \"Commands (all --json; human digest second)\" section parse their full flag surface (--repo, --since, --until, --agent, --ts, --window, --event-line, --json) and exit 2 unimplemented. NO later bead may add a `mod` declaration or a clap subcommand: this bead is the seam, so every W1-W3 bead edits exactly one file nobody else owns.\n\nFolded in from the former model bead: SessionMeta, Turn, Role and a time-window type exist in src/model.rs with serde derives, satisfying the spec's \"discover() -> Vec<SessionMeta>, read(path) -> Vec<Turn>\". SessionMeta carries at minimum path, cwd, first_ts, last_ts, turn_count, parse_failures. A Confidence+Evidence pair exists for \"Scored match that always reports confidence and evidence, never a bare answer\". Module doc records why cwd is an Option (a session may never state one) and why timestamps are chrono DateTime<Utc>. A unit test round-trips each type through serde_json. These types are REAL here, not todo!() — every other bead compiles against them.",
+    "title": "skeleton: a module tree and CLI surface that compiles before anyone fills it in",
+    "files": [
+      "src/main.rs",
+      "src/cli.rs",
+      "src/model.rs",
+      "src/connector/mod.rs",
+      "src/connector/claude_code.rs",
+      "src/connector/generic_jsonl.rs",
+      "src/pact_events.rs",
+      "src/worktree.rs",
+      "src/join.rs",
+      "src/prune.rs",
+      "src/cmd/mod.rs",
+      "src/cmd/sessions.rs",
+      "src/cmd/at.rs",
+      "src/cmd/grep.rs",
+      "src/cmd/explain.rs",
+      "src/cmd/doctor.rs"
+    ],
+    "deps": [],
+    "spec": "Commands (all --json; human digest second) — sessions / at / grep / explain / doctor",
+    "wave": 0
+  },
+  {
+    "key": "connector",
+    "acceptance": "A `Connector` trait with exactly `discover()` and `read(path)` per the spec line, plus a `roots()` for `doctor`. Registry returns the two connectors and NO more — the module doc quotes \"exactly two\" and \"but do not add one\" as the reason there is no plugin mechanism. Errors are per-file, never fatal: the trait's contract for \"one bad line never fails a file\" is stated here and enforced by the return types.",
+    "title": "connector: the two-method trait and the roots it discovers",
+    "files": [
+      "src/connector/mod.rs"
+    ],
+    "deps": [
+      "skeleton"
+    ],
+    "spec": "Connector trait (discover() -> Vec<SessionMeta>, read(path) -> Vec<Turn>) so a third is one file — but do not add one.",
+    "wave": 1
+  },
+  {
+    "key": "formatnotes",
+    "acceptance": "docs/format-notes.md describes the ACTUAL layout under ~/.claude/projects on this machine: the directory-name encoding of a project path (derived from real examples, including at least one worktree path), the JSONL line kinds actually present with their observed frequency, which fields carry cwd, timestamp, role and content, and which lines carry none. Carries the observation date (2026-08-19) and a \"reverse-engineered, expect drift\" warning verbatim. Documents observed pathologies: truncated tails, non-JSON lines, sessions with no cwd. Cites file paths and line counts as evidence. THIS BEAD BLOCKS claude_code — the connector implements these notes, not guesses.",
+    "title": "format-notes: the real ~/.claude layout on THIS machine, observed not guessed",
+    "files": [
+      "docs/format-notes.md"
+    ],
+    "deps": [],
+    "spec": "Discover the real layout EMPIRICALLY on this machine before coding; document the observed schema in docs/format-notes.md with the date and a \"reverse-engineered, expect drift\" warning.",
+    "wave": 0
+  },
+  {
+    "key": "generic",
+    "acceptance": "Reads any directory of *.jsonl accepting either key of each pair the spec names: {ts|timestamp, role, content|text}. Module doc says \"best-effort\" and lists what it will not do. Unknown fields ignored; a bad line increments parse_failures and is skipped. Tests cover: both key spellings, a garbage line mid-file, a truncated last line, an empty file.",
+    "title": "generic_jsonl: best-effort reader for any dir of transcript jsonl",
+    "files": [
+      "src/connector/generic_jsonl.rs"
+    ],
+    "deps": [
+      "skeleton"
+    ],
+    "spec": "generic_jsonl: any dir of *.jsonl with {ts|timestamp, role, content|text}; documented best-effort.",
+    "wave": 1
+  },
+  {
+    "key": "pactevents",
+    "acceptance": "Parses .pact/events.jsonl into events carrying the spec's named fields: agent, at, path, invoked_from, detail. chain_hash is explicitly ignored — the module doc says why (verifying it would make recount a second pact). Unknown fields ignored, bad lines counted not fatal. 1-based line addressing so `explain --event-line N` is unambiguous; the doc states the base. Tested against THIS repo's own .pact/events.jsonl and against a truncated copy.",
+    "title": "pact_events: tolerant reader for .pact/events.jsonl",
+    "files": [
+      "src/pact_events.rs"
+    ],
+    "deps": [
+      "skeleton"
+    ],
+    "spec": "recount reads .pact/events.jsonl directly (tolerant, chain_hash ignored); the dependency is one-way — pact never learns recount exists.",
+    "wave": 1
+  },
+  {
+    "key": "ci",
+    "acceptance": "One workflow running `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo test` — the spec's \"clippy -D warnings, fmt\" house rule, enforced rather than hoped for. Cached, single job, no matrix (no network, no cross-platform claims to keep). Adds a file-length check that warns above 800 lines, citing the spec's \"~200-800 lines\" rule.",
+    "title": "ci: fmt, clippy -D warnings, test on every push",
+    "files": [
+      ".github/workflows/ci.yml",
+      "rustfmt.toml"
+    ],
+    "deps": [],
+    "spec": "House rules: clippy -D warnings, fmt, module docs that carry decisions, files sized ~200-800 lines (the lease/context/diff unit).",
+    "wave": 0
+  },
+  {
+    "key": "claudecode",
+    "acceptance": "Implements exactly what docs/format-notes.md observed — every field access cites a notes section, and any divergence is a change to the notes first. Honours the spec's tolerance contract: \"unknown fields ignored, truncated tails counted not fatal, one bad line never fails a file\". Reads real sessions from this machine in a test that skips (not fails) when ~/.claude/projects is absent. Reads the fixture tree unconditionally.",
+    "title": "claude_code: the connector that implements format-notes",
+    "files": [
+      "src/connector/claude_code.rs",
+      "src/worktree.rs"
+    ],
+    "deps": [
+      "connector",
+      "formatnotes"
+    ],
+    "spec": "claude_code: sessions under ~/.claude/projects/<encoded-path>/*.jsonl ... Tolerant parsing: unknown fields ignored, truncated tails counted not fatal, one bad line never fails a file.",
+    "wave": 2
+  },
+  {
+    "key": "worktree",
+    "acceptance": "Given --repo, enumerates the repo and its `git worktree list` worktrees and maps each to its encoded ~/.claude/projects directory, per the encoding documented in format-notes.md — the spec's \"before any file opens\" is the test: no session file is opened during resolution. Reports worktree paths that no longer exist on disk (the pruned-worktree case `at` must refuse on) rather than silently dropping them. Also resolves the reverse direction, session cwd -> which worktree, for the join. Tests: a repo with worktrees, a repo with none, a repo whose worktree was pruned, a --repo that is not a git repo.",
+    "title": "worktree: repo path to the set of encoded session directories",
+    "files": [
+      "src/worktree.rs"
+    ],
+    "deps": [
+      "skeleton"
+    ],
+    "spec": "--repo resolves to the project's encoded session directories (repo + worktrees) before any file opens",
+    "wave": 1
+  },
+  {
+    "key": "join",
+    "acceptance": "Scores (event, session) pairs on exactly the three signals the spec names, in that precedence: the topological chain invoked_from -> worktree path -> session cwd; REQUIRED time-window overlap (no overlap = no match, never a low score); transcript-mention tiebreaker on PACT_AGENT name or bead id. Every result carries confidence AND the evidence that produced it — there is no code path returning a bare answer. Distinguishes the two refusal reasons the `at` command must print: no cwd match vs no overlap. Unit tests pin each signal in isolation and the two refusals.",
+    "title": "join: topological scoring that always shows its evidence",
+    "files": [
+      "src/join.rs"
+    ],
+    "deps": [
+      "pactevents",
+      "worktree"
+    ],
+    "spec": "Join key is TOPOLOGICAL: invoked_from -> worktree path -> session cwd, plus required time-window overlap, plus a transcript-mention tiebreaker (PACT_AGENT name or bead id). Scored match that always reports confidence and evidence, never a bare answer.",
+    "wave": 2
+  },
+  {
+    "key": "prune",
+    "acceptance": "Given a time window, partitions candidate session files into opened and skipped using mtime alone, exploiting the spec's stated invariant that \"sessions are append-only\". A file whose mtime precedes the window start cannot contain a turn inside the window and is skipped UNOPENED — the test proves it by counting opens, not by timing. States the one-sided nature of the argument in the module doc: mtime bounds the last turn, never the first, so the lower bound prunes and the upper bound does not. No window = no pruning.",
+    "title": "prune: mtime windowing that never opens a file it can skip",
+    "files": [
+      "src/prune.rs"
+    ],
+    "deps": [
+      "skeleton"
+    ],
+    "spec": "sessions are append-only, so mtime prunes files outside the query window unopened",
+    "wave": 1
+  },
+  {
+    "key": "cmdsessions",
+    "acceptance": "Prints exactly the spec's contract: \"sessions whose cwd resolves into the repo or its worktrees, fleet-identity guesses attached\", honouring --since/--until through prune. --json first and a human digest second, as the Commands section requires of every command. A repo with no sessions prints an empty list and exits 0 — not an error.",
+    "title": "sessions: list the transcripts that belong to a repo",
+    "files": [
+      "src/cmd/sessions.rs",
+      "src/connector/generic_jsonl.rs"
+    ],
+    "deps": [
+      "connector",
+      "worktree",
+      "prune"
+    ],
+    "spec": "recount sessions --repo <p> [--since --until] : sessions whose cwd resolves into the repo or its worktrees, fleet-identity guesses attached.",
+    "wave": 2
+  },
+  {
+    "key": "cmdgrep",
+    "acceptance": "Emits precisely the spec's five-tuple per hit: (session, line, ts, role, snippet). Matching is case-insensitive substring and NOTHING else — the module doc quotes the refusal \"no fuzzy search (case-insensitive substring only)\" as the reason there is no regex flag. Honours --agent/--since/--until. --json plus human digest.",
+    "title": "grep: case-insensitive substring hits with their coordinates",
+    "files": [
+      "src/cmd/grep.rs"
+    ],
+    "deps": [
+      "cmdsessions",
+      "prune",
+      "connector",
+      "integration"
+    ],
+    "spec": "recount grep <needle> --repo <p> [--agent --since --until] : (session, line, ts, role, snippet) hits.",
+    "wave": 4
+  },
+  {
+    "key": "cmdat",
+    "acceptance": "Exit 0 on a confident match with the transcript window printed; exit 1 on no-confident-match, and the output names WHICH of the spec's two reasons applies — \"no cwd match\" or \"no overlap\". Never exits 1 silently and never exits 0 on a bare answer: confidence and evidence are in both the JSON and the digest. --window defaults to 5m and parses the same duration spellings as pact.",
+    "title": "at: the session driving an identity at a moment, or a reasoned refusal",
+    "files": [
+      "src/cmd/at.rs"
+    ],
+    "deps": [
+      "join",
+      "cmdsessions",
+      "integration"
+    ],
+    "spec": "recount at --repo <p> --agent <name> --ts <rfc3339> [--window 5m] : resolve the session driving that identity at that moment; print the transcript window. Exit 0 found / 1 no-confident-match with the reason (no cwd match vs no overlap).",
+    "wave": 4
+  },
+  {
+    "key": "cmdexplain",
+    "acceptance": "Reads event N (1-based, per pact_events) from .pact/events.jsonl, derives agent and ts from it and runs the same code path as `at` — literally calls it, does not reimplement the join. Inherits `at`'s exit codes and refusal reasons. An out-of-range N is a clean error naming the line count, not a panic. Demonstrated end to end against THIS repo's own .pact/events.jsonl.",
+    "title": "explain: one command from an audit finding to the agent's own words",
+    "files": [
+      "src/cmd/explain.rs"
+    ],
+    "deps": [
+      "pactevents",
+      "cmdat",
+      "join"
+    ],
+    "spec": "recount explain --repo <p> --event-line <N> : read event N from .pact/events.jsonl, run `at` on it — one command from finding to testimony.",
+    "wave": 5
+  },
+  {
+    "key": "cmddoctor",
+    "acceptance": "Reports each of the four things the spec names: connector roots, session counts, parse-failure tallies, and join-readiness answering both of its questions — events present? worktree paths alive? Runs to completion and exits 0 in a bare directory with none of them, degrading calmly per the proof obligation \"calm degradation, never a panic\". --json plus human digest.",
+    "title": "doctor: is a join even possible here, and why not",
+    "files": [
+      "src/cmd/doctor.rs"
+    ],
+    "deps": [
+      "connector",
+      "pactevents",
+      "worktree"
+    ],
+    "spec": "recount doctor : connector roots, session counts, parse-failure tallies, join-readiness (events present? worktree paths alive?).",
+    "wave": 2
+  },
+  {
+    "key": "fixtures",
+    "acceptance": "A committed fixture ~/.claude tree and a fixture events.jsonl with a join that is known by construction. Three tests, each named for its obligation: `at` FINDS the known join; `at` REFUSES with exit 1 and the correct reason once the worktree is pruned; truncated and garbage fixtures are counted, not fatal. Fixtures are small and readable — a human can verify the expected join by eye.",
+    "title": "fixtures: a known join, and the pruned worktree it must refuse",
+    "files": [
+      "tests/common/mod.rs",
+      "tests/fixtures/",
+      "tests/join_fixture.rs"
+    ],
+    "deps": [
+      "join",
+      "cmdat",
+      "claudecode"
+    ],
+    "spec": "Fixture ~/.claude tree + fixture events.jsonl with a KNOWN join: `at` finds it, and correctly refuses (exit 1 + reason) when the worktree is pruned. Truncated/garbage fixtures.",
+    "wave": 5
+  },
+  {
+    "key": "degradation",
+    "acceptance": "Runs EVERY one of the five commands against a real bare tempdir holding a .pact/events.jsonl and no sessions whatsoever. Asserts no panic, an exit code that is 0 or 1 by the command's documented contract (never 101), and a message a human can act on. The spec's parenthetical is the rationale in the test module doc: \"recount will often run where transcripts don't exist\".",
+    "title": "degradation: every command against events with no sessions",
+    "files": [
+      "tests/degradation.rs"
+    ],
+    "deps": [
+      "cmdsessions",
+      "cmdat",
+      "cmdgrep",
+      "cmdexplain",
+      "cmddoctor"
+    ],
+    "spec": "Integration: run every command against a repo with events but NO sessions — calm degradation, never a panic (recount will often run where transcripts don't exist).",
+    "wave": 6
+  },
+  {
+    "key": "bench",
+    "acceptance": "Two measurements against the spec's two ceilings: a pruned `at` under 100ms, and an unwindowed grep over 500 synthetic sessions totalling ~200MB under 2s. The corpus is generated into a tempdir at run time and deleted — 200MB is not committed. Marked #[ignore] so CI stays fast, with the exact command to run it in the module doc, and it prints the achieved numbers so the README's deferral trigger (\"iff real windowed queries exceed ~2s\") can be evaluated against evidence.",
+    "title": "bench: the two numbers the spec puts a ceiling on",
+    "files": [
+      "tests/bench.rs"
+    ],
+    "deps": [
+      "prune",
+      "cmdat",
+      "cmdgrep"
+    ],
+    "spec": "Bench: pruned `at` <100ms; unwindowed grep over 500 synthetic sessions (~200MB) <2s.",
+    "wave": 5
+  },
+  {
+    "key": "notespolish",
+    "acceptance": "Reconciles the notes with everything the claude_code connector and `doctor` actually hit in W2-W3: every field the connector reads is documented, every documented field is read or marked unused-on-purpose, and every pathology the parse-failure tallies surfaced is listed. Date and the \"reverse-engineered, expect drift\" warning still present and still accurate.",
+    "title": "format-notes: polish the observations against what the connector learned",
+    "files": [
+      "docs/format-notes.md"
+    ],
+    "deps": [
+      "claudecode",
+      "cmddoctor"
+    ],
+    "spec": "document the observed schema in docs/format-notes.md with the date and a \"reverse-engineered, expect drift\" warning.",
+    "wave": 3
+  },
+  {
+    "key": "worked",
+    "acceptance": "A transcript of `recount explain --repo . --event-line N` run for real against THIS repo's own .pact/events.jsonl, with the actual transcript window pasted in if this machine has the sessions, and the fixture replay if it does not — the spec's \"if present, else the fixture\" branch is stated explicitly, and which branch was taken is recorded. Shows the confidence and evidence, not just the answer.",
+    "title": "worked-example: recount's first testimony is about its own birth",
+    "files": [
+      "docs/worked-example.md"
+    ],
+    "deps": [
+      "cmdexplain",
+      "cmdat",
+      "claimfix"
+    ],
+    "spec": "one worked example replaying a real past finding from this machine's history if present, else the fixture.",
+    "wave": 7
+  },
+  {
+    "key": "readme",
+    "acceptance": "Carries the spec's refusals section with its intent intact — no TUI, no daemon, no network, no embeddings, no fuzzy search, one connector family, and NO PERSISTENCE with the reason \"recount owns no store that can drift from sources it does not own\". Credits cass (Dicklesworthstone/coding_agent_session_search) as the product-scale proof of the idea recount takes 3% of. Records the sidecar-manifest deferral with its exact trigger — \"iff real windowed queries exceed ~2s on a real corpus — never a content index, never a database\" — and the bench numbers actually measured. Links the worked example.",
+    "title": "README: the refusals are the feature",
+    "files": [
+      "README.md"
+    ],
+    "deps": [
+      "worked",
+      "notespolish",
+      "cmddoctor",
+      "bench",
+      "degradation",
+      "grepperf"
+    ],
+    "spec": "Docs: README (incl. the refusals section and the cass credit), format-notes.md, and one worked example",
+    "wave": 8
+  },
+  {
+    "key": "integration",
+    "title": "integration: make the connectors and the commands agree",
+    "files": [
+      "src/connector/mod.rs",
+      "src/cmd/doctor.rs",
+      "src/cmd/sessions.rs",
+      ".github/workflows/ci.yml"
+    ],
+    "deps": [
+      "cmdsessions",
+      "cmddoctor",
+      "claudecode",
+      "connector"
+    ],
+    "spec": "Connectors (exactly two) ... Commands (all --json; human digest second)",
+    "acceptance": "see bead notes",
+    "wave": 3
+  },
+  {
+    "key": "honesty",
+    "title": "honesty: a line we declined is not a line that was damaged",
+    "files": [
+      "src/model.rs",
+      "src/connector/claude_code.rs",
+      "src/connector/generic_jsonl.rs",
+      "src/cmd/doctor.rs",
+      "src/cmd/sessions.rs"
+    ],
+    "deps": [
+      "integration",
+      "notespolish",
+      "claudecode",
+      "generic",
+      "cmdsessions",
+      "cmddoctor"
+    ],
+    "spec": "recount doctor : ... parse-failure tallies",
+    "acceptance": "see bead",
+    "wave": 4
+  },
+  {
+    "key": "claimfix",
+    "title": "claim: a file its connector understood must not fall through to the fallback",
+    "files": [
+      "src/connector/mod.rs",
+      "src/connector/claude_code.rs",
+      "src/connector/generic_jsonl.rs"
+    ],
+    "deps": [
+      "integration",
+      "honesty",
+      "fixtures",
+      "claudecode",
+      "generic"
+    ],
+    "spec": "Connectors (exactly two)",
+    "acceptance": "see bead",
+    "wave": 6
+  },
+  {
+    "key": "grepperf",
+    "title": "grep: parse the corpus once, not twice",
+    "files": [
+      "src/cmd/grep.rs",
+      "src/connector/mod.rs"
+    ],
+    "deps": [
+      "bench",
+      "cmdgrep",
+      "claimfix"
+    ],
+    "spec": "Bench: ... unwindowed grep over 500 synthetic sessions (~200MB) <2s",
+    "acceptance": "see bead",
+    "wave": 7
+  }
+]

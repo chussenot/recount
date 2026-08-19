@@ -307,7 +307,8 @@
     "id": "recount-hwk.47",
     "wave": 7,
     "files": [
-      "src/cmd/grep.rs"
+      "src/cmd/grep.rs",
+      "src/connector/mod.rs"
     ],
     "depends_on": [
       "recount-hwk.40",
