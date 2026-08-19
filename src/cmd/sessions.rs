@@ -38,7 +38,7 @@
 //!   "sessions": [ {
 //!       "path": "…/subagents/agent-<hex>.jsonl",
 //!       "connector": "claude_code",
-//!       "cwd": <path|null>,
+//!       "cwd": <path|null>,                    // the most frequent one (§4.2)
 //!       "first_ts": <rfc3339|null>, "last_ts": <rfc3339|null>,
 //!       "turn_count": 128, "parse_failures": 2,
 //!       "worktree": <name|null>,                  // null: the cwd did not say
@@ -81,6 +81,14 @@
 //! surfaces the `.meta.json` `description` sidecar (§3.4) adds one
 //! [`Evidence`] to the same vector and one arm to the arithmetic in
 //! [`guess_identity`]. The output type does not move.
+//!
+//! # One session, one connector
+//!
+//! Discovery goes through [`connector::discover_all`], not over the registry
+//! directly: both connectors accept `*.jsonl`, so running them both over one
+//! set of directories would list every transcript twice — the second time as
+//! the fallback's "0 turns, N parse failures". `connector`'s module doc holds
+//! the ownership rule; `discovered` counts sessions, not readings of them.
 //!
 //! # No sessions is an answer
 //!
@@ -212,21 +220,21 @@ fn collect(
     let discovered: Vec<SessionMeta> = if dirs.is_empty() {
         Vec::new()
     } else {
-        connectors
-            .iter()
-            .flat_map(|c| c.discover(dirs, window))
-            .collect()
+        // Not `flat_map` over the registry: both connectors accept `*.jsonl`,
+        // so that discovers every file once as itself and once as the
+        // fallback's garbage. `discover_all` is where the ownership rule lives.
+        connector::discover_all(connectors, dirs, window)
     };
 
     let mut excluded_by_cwd = 0;
     let mut sessions: Vec<SessionEntry> = Vec::new();
     for meta in &discovered {
-        let Some((repo_match, worktree)) = tie_to_repo(worktrees, meta.cwd.as_deref()) else {
+        let Some((repo_match, worktree, matched_cwd)) = tie_to_repo(worktrees, meta) else {
             excluded_by_cwd += 1;
             continue;
         };
         sessions.push(SessionEntry {
-            fleet_identity_guess: guess_identity(meta, worktrees, worktree),
+            fleet_identity_guess: guess_identity(meta, worktrees, worktree, matched_cwd.as_deref()),
             path: meta.path.clone(),
             connector: meta.connector.clone(),
             cwd: meta.cwd.clone(),
@@ -286,24 +294,46 @@ fn collect(
 ///   into "no sessions found", which is the misdiagnosis this tool exists to
 ///   prevent. The weaker basis is labelled instead.
 ///
-/// ponytail: this reads ONE cwd, and `SessionMeta.cwd` is a summary rather
-/// than the evidence. `docs/format-notes.md` §4.2 measured 46 of 871 files
-/// holding more than one cwd and one holding nine, and claude_code (landing
-/// on `wt/claudecode`, pact-msg-229b6cd0ee47491b) resolves the single field
-/// by most-frequent-wins. So a session that did half its work in this repo
-/// and more of it elsewhere lands in `excluded_by_cwd` instead of the list.
-/// It is *counted*, not silently dropped, which is the only reason this is
-/// shippable. The fix needs a field that does not exist yet: take the whole
-/// `Vec<PathBuf>` and keep the session if ANY of them resolves — one
-/// signature change here and one at the call site, once both branches are on
-/// master. Tracked as recount-hwk.33's follow-up.
+/// # A cwd is a set, so this matches on any of them
+///
+/// [`SessionMeta::cwd`] holds one path, and `claude_code` fills it
+/// most-frequent-wins — a summary, not the evidence. `docs/format-notes.md`
+/// §4.2 measured 46 of 871 real files stating more than one cwd and one
+/// stating nine, so a session that did some of its work here and more of it
+/// elsewhere would be excluded on a summary that named the elsewhere. The rule
+/// is **any** cwd resolving, so when the summary does not resolve the whole set
+/// is asked for ([`all_cwds`]) before the session is dropped. The third element
+/// of the return is the cwd that actually resolved, which is what the topology
+/// evidence must quote — the summary would name a directory in another repo.
 fn tie_to_repo<'a>(
     worktrees: &'a [Worktree],
-    cwd: Option<&Path>,
-) -> Option<(RepoMatch, Option<&'a Worktree>)> {
-    match cwd {
-        None => Some((RepoMatch::SessionDir, None)),
-        Some(cwd) => worktree::for_cwd(worktrees, cwd).map(|w| (RepoMatch::Cwd, Some(w))),
+    meta: &SessionMeta,
+) -> Option<(RepoMatch, Option<&'a Worktree>, Option<PathBuf>)> {
+    let Some(cwd) = meta.cwd.clone() else {
+        return Some((RepoMatch::SessionDir, None, None));
+    };
+    if let Some(w) = worktree::for_cwd(worktrees, &cwd) {
+        return Some((RepoMatch::Cwd, Some(w), Some(cwd)));
+    }
+    all_cwds(meta).into_iter().find_map(|cwd| {
+        worktree::for_cwd(worktrees, &cwd).map(|w| (RepoMatch::Cwd, Some(w), Some(cwd)))
+    })
+}
+
+/// Every cwd the file states, most frequent first, for the connector that can
+/// say. Empty for one that cannot — `generic_jsonl` states none at all, by
+/// design, so there is nothing to ask it.
+///
+/// This re-reads the transcript, which is why it is only reached for a session
+/// whose summary cwd already failed to resolve: the cost falls on the sessions
+/// that were about to be excluded, not on every session. Should that ever
+/// matter, the fix is a `SessionMeta` that carries the set — which is the
+/// change this function exists to avoid making across three other beads' files.
+fn all_cwds(meta: &SessionMeta) -> Vec<PathBuf> {
+    if meta.connector == connector::claude_code::ClaudeCode.name() {
+        connector::claude_code::scan(&meta.path).identity.cwds
+    } else {
+        Vec::new()
     }
 }
 
@@ -319,23 +349,37 @@ const PACT_AGENT: &str = "PACT_AGENT=";
 /// guess that came out empty, and why "unknown" is an answer with reasons
 /// rather than a shrug.
 ///
-/// `worktree` is the checkout the cwd resolved into, if any.
+/// `worktree` is the checkout the cwd resolved into and `cwd` is the cwd that
+/// resolved into it — which is not always [`SessionMeta::cwd`], see
+/// [`tie_to_repo`].
 fn guess_identity(
     meta: &SessionMeta,
     worktrees: &[Worktree],
     worktree: Option<&Worktree>,
+    cwd: Option<&Path>,
 ) -> FleetGuess {
     let mut evidence = Vec::new();
+
+    // A session that matched on a cwd other than its most frequent one would
+    // otherwise read as a contradiction: the JSON's `cwd` field is the summary
+    // and would name another repo entirely.
+    let summary = match (&meta.cwd, cwd) {
+        (Some(s), Some(c)) if s.as_path() != c => format!(
+            " (the file's most frequent cwd is {} — §4.2: a session can state several)",
+            s.display()
+        ),
+        _ => String::new(),
+    };
 
     // Signal 1: topology. The main checkout is not an identity — every agent
     // of a pact run reports it (format-notes §4.3) — so only a linked worktree
     // names anyone.
     let main = worktrees.first().map(|w| w.path.as_path());
-    let from_cwd = match (worktree, &meta.cwd) {
+    let from_cwd = match (worktree, cwd) {
         (Some(w), Some(cwd)) if Some(w.path.as_path()) != main => {
             evidence.push(Evidence::new(
                 Signal::Topology,
-                format!("cwd {} is worktree `{}`", cwd.display(), w.name),
+                format!("cwd {} is worktree `{}`{summary}", cwd.display(), w.name),
             ));
             Some(w.name.clone())
         }
@@ -344,7 +388,7 @@ fn guess_identity(
                 Signal::Topology,
                 format!(
                     "cwd {} is the repo root, which every agent of a pact run shares \
-                     (docs/format-notes.md §4.3) — it names no one",
+                     (docs/format-notes.md §4.3) — it names no one{summary}",
                     cwd.display()
                 ),
             ));
@@ -939,6 +983,62 @@ mod tests {
         );
         assert_eq!(r.warnings.len(), 1);
         assert!(r.warnings[0].contains("`gone`"), "{:?}", r.warnings);
+    }
+
+    /// `docs/format-notes.md` §4.2: 46 of 871 real files state more than one
+    /// cwd, and `SessionMeta.cwd` is only the most frequent of them. A session
+    /// that did most of its work in another repo and some of it here is listed
+    /// with the worktree it touched, not counted in `excluded_by_cwd`.
+    #[test]
+    fn any_cwd_resolving_into_the_repo_is_enough() {
+        let td = TempDir::new().unwrap();
+        let line = |hm: &str, cwd: &str| {
+            format!(
+                "{{\"type\":\"user\",\"timestamp\":\"2026-08-19T{hm}:00.000Z\",\
+                 \"cwd\":\"{cwd}\",\"message\":{{\"role\":\"user\",\"content\":\"x\"}}}}\n"
+            )
+        };
+        fs::write(
+            td.path().join("multi.jsonl"),
+            format!(
+                "{}{}{}",
+                line("07:00", "/other/repo"),
+                line("07:01", "/other/repo"),
+                line("07:02", "/r/wt/a")
+            ),
+        )
+        .unwrap();
+
+        let worktrees = [wt("/r", "main"), wt("/r/wt/a", "a")];
+        // The real registry: only `claude_code` states a cwd at all, and only
+        // it can be asked for the whole set.
+        let r = collect(
+            &connector::registry(),
+            Path::new("/r"),
+            &worktrees,
+            &[td.path().to_path_buf()],
+            &TimeWindow::default(),
+        );
+
+        assert_eq!(r.discovered, 1, "one file, one connector");
+        assert_eq!(r.excluded_by_cwd, 0, "the summary lost, the set won");
+        let s = &r.sessions[0];
+        assert_eq!(s.connector, "claude_code");
+        assert_eq!(s.repo_match, RepoMatch::Cwd);
+        assert_eq!(s.worktree.as_deref(), Some("a"));
+        assert_eq!(
+            s.cwd.as_deref(),
+            Some(Path::new("/other/repo")),
+            "the summary is still reported as what it is"
+        );
+        // …and the topology evidence quotes the cwd that actually resolved, so
+        // the entry cannot be read as a contradiction.
+        let topology = &s.fleet_identity_guess.evidence[0].detail;
+        assert!(topology.contains("/r/wt/a is worktree `a`"), "{topology}");
+        assert!(
+            topology.contains("most frequent cwd is /other/repo"),
+            "{topology}"
+        );
     }
 
     #[test]
