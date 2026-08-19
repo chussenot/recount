@@ -228,10 +228,6 @@ pub fn projects_root() -> PathBuf {
 /// "look at what you were handed". Collapsing them into `None` would tell a
 /// human to go hunting for a transcript that was never named.
 ///
-/// `dead_code`: the keyed tier of the join is the next bead and the tests are
-/// this type's only caller until it lands. The allow comes off with the first
-/// real one — it is not a licence for the type to stay unused.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Keyed {
     /// The transcript is on disk, here.
@@ -274,7 +270,6 @@ pub enum Keyed {
 /// topological tier. This is not the gap it looks like: the only recipe by
 /// which an agent can learn its own id (§10.3) globs the flat directory, so an
 /// id that reached a pact event came from a flat file by construction.
-#[allow(dead_code)] // Same as [`Keyed`]: the join's keyed tier is the next bead.
 pub fn keyed(project_dir: &Path, session: &str, subagent: Option<&str>) -> Keyed {
     if let Some(why) = malformed("harness_session", session) {
         return Keyed::Malformed(why);

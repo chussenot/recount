@@ -275,16 +275,8 @@ impl fmt::Display for Confidence {
 /// Variant order *is* the ladder — `Topological` below, `Keyed` above — so the
 /// derived `PartialOrd` ranks any keyed answer over every score, and two
 /// topological answers against each other.
-//
-// Nothing constructs a `Tier` until the join bead (recount-1cw.5) does, and
-// this crate is a binary, so `pub` does not count as a use. The `not(test)`
-// cfg means the expectation is fulfilled only in the build where the type is
-// genuinely unreferenced — when the join starts calling it, the expectation
-// goes unfulfilled and the build tells that bead to delete these four
-// attributes.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "TierRepr", into = "TierRepr")]
-#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
 pub enum Tier {
     /// Inferred, by the four-rung ladder in `join.rs`, against `CONFIDENT`.
     /// The number means what it has always meant.
@@ -294,7 +286,6 @@ pub enum Tier {
     Keyed,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
 impl Tier {
     /// The score, when there is one. `None` for a keyed answer, and there is
     /// no default to substitute: an identity has no position on the ladder.
@@ -317,6 +308,16 @@ impl Tier {
 
     /// The word this tier serialises as, so human output and `--json` cannot
     /// drift apart.
+    //
+    // The join (recount-1cw.5) uses the type but not this word: the digest
+    // headers that print it are `at`, `explain` and `sessions`, next wave. Same
+    // mechanism as the four attributes that guarded the whole type before it
+    // had a caller — the expectation goes unfulfilled the moment recount-1cw.6
+    // prints the word, and the build says so.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the digest word lands in recount-1cw.6")
+    )]
     pub fn name(self) -> &'static str {
         match self {
             Tier::Keyed => "keyed",
@@ -339,7 +340,6 @@ impl fmt::Display for Tier {
 /// The wire shape of a [`Tier`]: the two flat fields, meant to be
 /// `#[serde(flatten)]`ed into whatever carries the answer.
 #[derive(Serialize, Deserialize)]
-#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
 struct TierRepr {
     tier: TierName,
     /// Always written, `null` for keyed — see the module doc. `default` on the
@@ -350,7 +350,6 @@ struct TierRepr {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
 enum TierName {
     Keyed,
     Topological,
