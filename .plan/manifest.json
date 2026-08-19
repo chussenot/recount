@@ -227,18 +227,19 @@
   },
   {
     "id": "recount-hwk.42",
-    "wave": 6,
+    "wave": 7,
     "files": [
       "docs/worked-example.md"
     ],
     "depends_on": [
       "recount-hwk.36",
-      "recount-hwk.35"
+      "recount-hwk.35",
+      "recount-hwk.46"
     ]
   },
   {
     "id": "recount-hwk.43",
-    "wave": 7,
+    "wave": 8,
     "files": [
       "README.md"
     ],
@@ -283,6 +284,22 @@
       "recount-hwk.26",
       "recount-hwk.33",
       "recount-hwk.37"
+    ]
+  },
+  {
+    "id": "recount-hwk.46",
+    "wave": 6,
+    "files": [
+      "src/connector/mod.rs",
+      "src/connector/claude_code.rs",
+      "src/connector/generic_jsonl.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.44",
+      "recount-hwk.45",
+      "recount-hwk.38",
+      "recount-hwk.29",
+      "recount-hwk.26"
     ]
   }
 ]
