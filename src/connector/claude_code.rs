@@ -256,15 +256,15 @@ impl Connector for ClaudeCode {
             .into_iter()
             .filter(|p| !is_journal(p))
             .collect();
+        // `window` is the mtime prune and nothing else. Every file that was
+        // opened comes back, in window or not: recognising it IS the claim,
+        // and dropping one here would hand a transcript this connector reads
+        // perfectly well to the fallback, which reads it as nothing. The span
+        // filter lives once, in `connector::discover_all`.
         prune::partition(&files, window)
             .opened
             .iter()
             .map(|path| scan(path).meta)
-            // mtime prunes only the lower bound (see `prune`); once a file is
-            // open its real span is known, so rule out what it now can. A file
-            // with no parsed turns has an unbounded span and survives, which is
-            // what `doctor` wants: its tallies are the point.
-            .filter(|meta| meta.window().overlaps(window))
             .collect()
     }
 
@@ -980,18 +980,32 @@ mod tests {
         assert!(ClaudeCode.discover(&project(&d), &later).is_empty());
 
         // A window inside the corpus: mtime cannot prune (every fixture was
-        // written just now), so the parsed spans do the ruling out.
+        // written just now), and `discover` does NOT prune on the parsed span
+        // either — recognising a file is this connector's claim on it, and a
+        // claim released here is a claim `generic_jsonl` picks up. The span
+        // filter belongs to `discover_all` and is tested there.
         let inside = TimeWindow {
             since: crate::model::parse_ts("2026-08-19T07:19:00Z").ok(),
             until: crate::model::parse_ts("2026-08-19T07:26:00Z").ok(),
         };
-        let names: Vec<String> = ClaudeCode
+        let claimed: Vec<String> = ClaudeCode
             .discover(&project(&d), &inside)
             .iter()
             .map(|m| m.path.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
-        assert!(names.contains(&"22222222-2222-3333-4444-555555555555.jsonl".to_string()));
-        assert!(!names.contains(&"11111111-2222-3333-4444-555555555555.jsonl".to_string()));
+        assert!(claimed.contains(&"22222222-2222-3333-4444-555555555555.jsonl".to_string()));
+        assert!(
+            claimed.contains(&"11111111-2222-3333-4444-555555555555.jsonl".to_string()),
+            "out of window is still recognised, and so still claimed: {claimed:?}"
+        );
+        // …and the window then rules it out, once, centrally.
+        let kept: Vec<String> =
+            crate::connector::discover_all(&crate::connector::registry(), &project(&d), &inside)
+                .iter()
+                .map(|m| m.path.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+        assert!(kept.contains(&"22222222-2222-3333-4444-555555555555.jsonl".to_string()));
+        assert!(!kept.contains(&"11111111-2222-3333-4444-555555555555.jsonl".to_string()));
 
         // Nothing anywhere near the tree is not a panic.
         assert!(ClaudeCode

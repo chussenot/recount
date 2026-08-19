@@ -42,6 +42,40 @@
 //! it is last in [`registry`], so it only ever reports what the specific
 //! connector declined.
 //!
+//! # Claiming is recognition, and the window is applied after it
+//!
+//! A connector claims a path by **recognising** it, not by having something to
+//! say about it in the caller's window. Those came apart once and it cost a
+//! phantom session per out-of-window transcript: each `discover` used to apply the parsed-span filter
+//! itself, so a real transcript whose turns all fell after `--until` was
+//! dropped by `claude_code` — which silently released the claim, handed the
+//! path to `generic_jsonl`, and let the fallback report it as "0 turns, span
+//! null..null". An unbounded span overlaps every window by construction, so
+//! the phantom survived the very filter that had excluded the real reading of
+//! the same bytes.
+//!
+//! So [`discover_all`] claims by path first and applies the window **once,
+//! centrally, after the claim**. A connector's `discover` returns what it
+//! recognises; `window` reaches it only as the mtime prune hint the spec's
+//! cheapness argument needs (see [`crate::prune`] for why that prune is
+//! one-sided). The rule generalises past the bug: whether a file is in the
+//! window is a property of the query, and only who *understands* the file can
+//! be a property of the connector.
+//!
+//! # A session with no parsed timestamps, under an explicit window
+//!
+//! It is dropped, and this now agrees with [`crate::join`]: "unbounded" would
+//! mean "overlaps everything", which is the opposite of what an absent clock
+//! tells us. An empty file, or one this reader understood nothing in, is not
+//! evidence that anything happened between `--since` and `--until`.
+//!
+//! Under an **unbounded** window it survives, unchanged — and that is what
+//! keeps `doctor` whole: its whole-machine sweep asks each connector for
+//! everything (`TimeWindow::default()`), where zero-turn sessions and their
+//! `parse_failures`/`declined` tallies are exactly the point. `doctor` also
+//! calls [`Connector::discover`] directly rather than through here, so it is
+//! twice unaffected.
+//!
 //! # Is `generic_jsonl` reachable through `--repo`?
 //!
 //! Essentially no, and never for a real Claude Code transcript. `--repo`
@@ -77,11 +111,18 @@ pub trait Connector {
     /// "the root you expected is not there" is the answer people need.
     fn roots(&self) -> Vec<PathBuf>;
 
-    /// Metadata for every session under `dirs` that `window` cannot rule out.
+    /// Metadata for every session under `dirs` that this connector
+    /// **recognises** — its claim on those paths (see the module doc).
     ///
     /// `dirs` are session directories (see [`crate::worktree::session_dirs`]),
-    /// not repo paths. A `dirs` entry that does not exist is skipped
-    /// silently. An unbounded `window` prunes nothing.
+    /// not repo paths. A `dirs` entry that does not exist is skipped silently.
+    ///
+    /// `window` is a **prune hint, not a filter**: pass it to
+    /// [`crate::prune::partition`] so files it rules out on mtime are never
+    /// opened, and then return everything that was. Do **not** drop a session
+    /// because its parsed span misses the window — that is
+    /// [`discover_all`]'s job, and doing it here releases the claim to the
+    /// next connector. An unbounded `window` prunes nothing.
     fn discover(&self, dirs: &[PathBuf], window: &TimeWindow) -> Vec<SessionMeta>;
 
     /// Every turn in one session file, in file order, with 1-based line
@@ -99,13 +140,14 @@ pub fn registry() -> Vec<Box<dyn Connector>> {
 }
 
 /// Every session under `dirs`, discovered **once**, by the first connector
-/// that claims it.
+/// that claims it — then filtered to `window`, once, here.
 ///
 /// Claiming is not a new trait method: a connector claims a path by returning
 /// a [`SessionMeta`] for it. Connectors run in `connectors` order (pass
 /// [`registry`], which puts `claude_code` first) and a path already claimed is
 /// dropped from every later connector's results. See the module doc for the
-/// rule and for what that leaves `generic_jsonl` doing.
+/// rule, for why the window is applied *after* the claim rather than inside
+/// each `discover`, and for what that leaves `generic_jsonl` doing.
 ///
 /// This is the registry's job rather than each command's: `sessions`, `grep`,
 /// `at` and `explain` all discover over the same directories and must all get
@@ -121,12 +163,25 @@ pub fn discover_all(
     let mut out = Vec::new();
     for connector in connectors {
         for meta in connector.discover(dirs, window) {
-            if claimed.insert(meta.path.clone()) {
+            // The claim is recorded first and unconditionally — `insert` runs
+            // before `&&` short-circuits — so a path the window excludes is
+            // still spoken for and cannot fall through to the fallback.
+            if claimed.insert(meta.path.clone()) && in_window(&meta, window) {
                 out.push(meta);
             }
         }
     }
     out
+}
+
+/// The window test, applied once, after the claim.
+///
+/// An unbounded window keeps everything (`doctor`'s sweep). Under an explicit
+/// one, a session with no parsed timestamp is dropped rather than kept: see
+/// the module doc, and [`crate::join`], which has always said the same.
+fn in_window(meta: &SessionMeta, window: &TimeWindow) -> bool {
+    let span = meta.window();
+    window.is_unbounded() || (!span.is_unbounded() && span.overlaps(window))
 }
 
 /// Every `*.jsonl` anywhere under each of `dirs`, sorted, deduplicated, and
@@ -202,6 +257,8 @@ mod tests {
 
     use tempfile::TempDir;
 
+    use crate::connector::claude_code::ClaudeCode;
+
     /// Create an empty file at `rel` under `dir`, parents included.
     fn touch(dir: &TempDir, rel: &str) -> PathBuf {
         let path = dir.path().join(rel);
@@ -255,6 +312,100 @@ mod tests {
         // (§2.4: a journal is not a transcript) — which is the only way it is
         // reachable through `--repo` at all.
         assert_eq!(by_path(&journal).connector, "generic_jsonl");
+    }
+
+    /// The W5-barrier defect: a real `claude_code` transcript whose turns all
+    /// fall after `--until` must be **absent**, not reappear under the
+    /// fallback as "0 turns, span null..null".
+    ///
+    /// It used to, because `claude_code::discover` applied the window itself
+    /// and thereby released its claim; `generic_jsonl` then picked the path up,
+    /// parsed nothing out of it, and reported an unbounded span — which
+    /// overlaps every window by construction, so it survived the very filter
+    /// that had excluded it.
+    #[test]
+    fn a_recognised_file_out_of_window_is_absent_not_reclaimed_by_the_fallback() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("-tmp-repo");
+        let early = dir.join("early.jsonl");
+        let late = dir.join("late.jsonl");
+        fs::create_dir_all(&dir).unwrap();
+        let turn = |ts: &str| {
+            format!(
+                "{{\"type\":\"user\",\"timestamp\":\"{ts}\",\"cwd\":\"/tmp/repo\",\
+                 \"message\":{{\"role\":\"user\",\"content\":\"hi\"}}}}\n"
+            )
+        };
+        fs::write(&early, turn("2026-08-19T07:00:00.000Z")).unwrap();
+        fs::write(&late, turn("2026-08-19T09:00:00.000Z")).unwrap();
+
+        let dirs = vec![dir];
+        let until = TimeWindow {
+            since: None,
+            until: crate::model::parse_ts("2026-08-19T08:20:00Z").ok(),
+        };
+
+        // `claude_code` claims both — recognition, not windowing — so the
+        // fallback is never offered `late.jsonl`.
+        let claimed = ClaudeCode.discover(&dirs, &until);
+        assert_eq!(claimed.len(), 2, "both are recognised");
+
+        let found = discover_all(&registry(), &dirs, &until);
+        assert_eq!(
+            found.iter().map(|m| &m.path).collect::<Vec<_>>(),
+            vec![&early],
+            "the out-of-window transcript is gone, not relabelled"
+        );
+        assert!(
+            !found.iter().any(|m| m.connector == "generic_jsonl"),
+            "the fallback must not claim what `claude_code` understood"
+        );
+        assert!(
+            found.iter().all(|m| m.window().since.is_some()),
+            "no null spans survive an explicit window"
+        );
+
+        // Unbounded, both come back — `doctor`'s sweep still sees everything.
+        assert_eq!(
+            discover_all(&registry(), &dirs, &TimeWindow::default()).len(),
+            2
+        );
+    }
+
+    /// A session with no parsed timestamp at all: kept when nothing was asked,
+    /// dropped by an explicit window. Same rule as [`crate::join`] — unbounded
+    /// would mean "always", which is the opposite of what a missing clock says.
+    #[test]
+    fn an_unbounded_span_survives_no_window_and_no_explicit_one() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("-tmp-repo");
+        let empty = dir.join("empty.jsonl");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(&empty, "").unwrap();
+        let dirs = vec![dir];
+
+        assert_eq!(
+            discover_all(&registry(), &dirs, &TimeWindow::default()).len(),
+            1,
+            "doctor's sweep wants the zero-turn session and its tallies"
+        );
+        for w in [
+            TimeWindow {
+                // Deliberately older than the file's mtime, so the mtime
+                // prune cannot be the reason it is absent.
+                since: crate::model::parse_ts("1999-01-01T00:00:00Z").ok(),
+                until: None,
+            },
+            TimeWindow {
+                since: None,
+                until: crate::model::parse_ts("2026-08-19T08:20:00Z").ok(),
+            },
+        ] {
+            assert!(
+                discover_all(&registry(), &dirs, &w).is_empty(),
+                "an absent clock is not evidence of activity in {w:?}"
+            );
+        }
     }
 
     /// Both layouts from `docs/format-notes.md`, plus the things that are not
