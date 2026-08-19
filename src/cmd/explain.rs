@@ -266,6 +266,11 @@ mod tests {
             path: None,
             invoked_from: None,
             detail: detail.map(str::to_string),
+            harness: None,
+            model: None,
+            harness_session: None,
+            harness_subagent: None,
+            branch: None,
         };
         assert_eq!(
             bead(&ev(Some("recount-hwk.23: the declared seam — CLI surface"))),
