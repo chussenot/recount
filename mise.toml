@@ -51,6 +51,12 @@ description = "Warn on files over the ~200-800 line house rule, counting code be
 # CI one.
 run = "scripts/check-lines.sh"
 
+[tasks."check-docs"]
+description = "Fail if docs/cli.md drifts from the binary, or a relative link or anchor is dead"
+# Needs a built binary: it reads the command tree out of `--help` rather than
+# hardcoding it, because a hardcoded list is the same drift one level down.
+run = ["cargo build", "scripts/check-docs.sh"]
+
 [tasks.dogfood]
 description = "Run recount against this repo's own coordination log — the check the test suite structurally cannot be"
 # This exists because it has already paid for itself twice. The 26-agent build of
@@ -90,6 +96,7 @@ run = [
   "mise run lint",
   "mise run test",
   "mise run lint-lines",
+  "mise run check-docs",
 ]
 
 [tasks.install]

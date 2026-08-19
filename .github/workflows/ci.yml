@@ -33,6 +33,12 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
+      # A real gate, unlike the length check below: a doc that describes a
+      # command the binary does not have sends a reader to a usage error while
+      # they believe the tool is broken. Reads the command tree out of --help,
+      # so it cannot go stale the way a hardcoded list would.
+      - run: ./scripts/check-docs.sh
+
       # Warning, not a gate: an 850-line file is a conversation, not a build
       # break. The awk lives in scripts/check-lines.sh so that `mise run
       # lint-lines` and this job cannot drift apart — a local gate that does not

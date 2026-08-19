@@ -1,325 +1,248 @@
 # recount
 
-Join a pact coordination ledger (`.pact/events.jsonl`) — *what* the agents of a
-fleet did — to their coding-agent session transcripts — *why* they did it. So
-that an audit finding can be answered with the agent's own words instead of an
-inference about them.
+**Session testimony for pact audits.** A coordination ledger records *what* your
+agents did. Their transcripts record *why*. recount joins the two, so a finding
+in an audit can be answered with the agent's own reasoning instead of a guess
+about it.
 
-recount reads pact's ledger directly and pact never learns recount exists: the
-dependency is one-way, and nothing here writes.
+It reads [pact](https://github.com/chussenot/pact)'s `.pact/events.jsonl` and
+your coding-agent session files. It owns no database, runs no daemon, and
+touches no network.
 
-One command takes a line number in `.pact/events.jsonl` and prints the
-transcript behind it:
+## The problem
 
-```
-$ recount explain --repo . --event-line 1
-recount explain — /home/chussenot/Documents/recount/.pact/events.jsonl line 1
-  event    2026-08-19T07:03:12.694912822+00:00 · agent `orchestrator`
-  from     worktree `main` — the join's first link
-  bead     none in detail — agent name only
+An audit of a multi-agent run can see everything except the only thing that
+explains it.
 
-recount at — /home/chussenot/Documents/recount
-  agent    `orchestrator`
-  moment   2026-08-19T07:03:12Z · window ±5m each side → [2026-08-19T06:58:12Z … 2026-08-19T07:08:12Z]
-  scanned  1 session dir(s) · 1 session(s) the window could not rule out
+The ledger is complete and useless on its own: agent `skeleton` held
+`src/model.rs` from 07:13 to 07:24, agent `join` merged at 08:39. Every row is
+true. None of them says why anyone did anything. So the reader infers motive
+from artifacts — from what the diff touched, from what the timestamps imply —
+and inference from artifacts is exactly how you get a confident wrong answer.
 
-  match           /home/chussenot/.claude/projects/-home-chussenot-Documents-recount/cd7c75eb-c39f-4be4-92ae-29efda5d7d69.jsonl
-    confidence 0.95 · threshold 0.50 · CONFIDENT
-      · topology: session cwd /home/chussenot/Documents/recount is worktree `main` — topology A (process-per-agent): the session cwd names the worktree, so the chain discriminates
-      · time overlap: session covers 2026-08-19T07:00:48Z..2026-08-19T09:41:03Z and overlaps the queried 2026-08-19T06:58:12Z..2026-08-19T07:08:12Z
-      · transcript mention: `orchestrator` at line 7 (user): …first) Run on an Opus-class orchestrator with the Task tool. Two-part…
+The motivating incident is the arkanoid-v1 misdiagnosis (`arkanoid`'s
+`docs/pact-audit.md`), where an audit reasoned from the shape of the changes to
+a conclusion about intent, and the conclusion was wrong. The agent had written
+down what it was doing, in its own words, at the time. Nobody could get at it,
+because nothing connected a row in the ledger to a transcript on disk.
 
-  transcript window — 66 turn(s) in [2026-08-19T06:58:12Z … 2026-08-19T07:08:12Z]
+That connection is the whole tool. Everything else here is a consequence of
+making it cheap and making it honest.
 
-    [2026-08-19T07:00:48Z] user (line 7)
-      # PROMPT — build `recount` as a pact fleet (beads first)
+## Why recount is shaped this way
 
-      Run on an Opus-class orchestrator with the Task tool. Two-part input:
-      Part A below is the product spec — commit it VERBATIM as docs/spec.md
-      before anything else; it is the contract every bead cites. …
-      [+7469 more characters — the full text is in --json]
+### The join key is topological, because a name is not an identity
 
-    [… 65 further turns, elided here, not by recount …]
-```
+Two agents in one run share a git identity, a clock and often a prompt. Their
+names are strings that appear in each other's transcripts constantly — an agent
+quoting a peer's assignment is not that peer. So the join does not start from
+names. It starts from *where the work happened*: the worktree an event was
+invoked from, the path that worktree occupies, and the session whose working
+directory resolves into it. A required time-window overlap narrows it, and only
+then does a transcript mention break a remaining tie.
 
-The ledger said the orchestrator set a policy. The transcript says what it was
-told to do. Exit 0.
+The ordering is the point. Topology is a fact about the filesystem; a mention is
+a coincidence of text. Reaching for the coincidence first is how you match the
+wrong session confidently. [docs/join.md](docs/join.md) has the full ladder.
 
-Every answer carries a confidence and the evidence behind it. There is no bare
-answer, because the join is inference over two artifacts, neither of which was
-written to be joined. Read [the weaknesses](#where-recount-is-weak) before you
-trust a number.
+### Every answer carries a confidence and its evidence, because the failure being prevented is a confident wrong one
 
-## Install
+recount could return the best-matching session and nothing else. It never does.
+Every result reports what it scored and *which signals produced that score* —
+and every refusal reports which of its two reasons applies, so "no transcript"
+and "no overlap in time" can never be confused for one another.
 
-```
-cargo build --release      # ./target/release/recount
-cargo install --path .     # or onto your PATH
-```
+This is not a UI preference. A tool built because an audit believed something
+false must not be able to hand you a false belief with a clean face. The number
+tells you how much to trust it; the evidence line is what lets you catch it
+being wrong. It is designed to be caught, because on some inputs it *is* wrong —
+see [Where recount is weak](#where-recount-is-weak), which is not a disclaimer
+section but a design consequence.
 
-Dependencies: `serde`, `serde_json`, `clap`, `clap_complete`, `chrono`,
-`anyhow`. `tempfile` for tests. Nothing else, by budget.
+### There is no database, because a store you own can drift from sources you do not
 
-## The six commands
+Session files belong to your coding agent. It appends to them, rotates them, and
+deletes them on its own schedule — this machine's corpus lost 14 files and
+gained others in under three hours while recount was being built. Any index
+recount kept would be a second, staler account of files it does not control,
+and the first time the two disagreed the reader would have no way to know which
+one lied.
 
-The spec's five all take `--json`; the human digest is printed second.
-`completion` is the sixth and the exception — see
-[the deviations](#deviations-from-the-specs-literal-text).
+So there is no store. Session files are the only truth, every run reads them
+fresh, and a stale answer is structurally impossible. The cost is paid at query
+time, which is why the next choice exists.
 
-```
-recount sessions --repo <p> [--since --until]
-    Sessions whose cwd resolves into the repo or its worktrees, with a
-    fleet-identity guess and the reasoning for it attached.
+### Scans are made cheap structurally, not by caching
 
-recount at --repo <p> --agent <name> --ts <rfc3339> [--window 5m]
-    Which session was driving that identity at that moment, and the
-    transcript window around it. Exit 0 found, exit 1 refused — either
-    with a reason, `no cwd match` or `no overlap`, or with a candidate
-    that scored below the bar and the evidence that fell short.
+Two properties do the work a cache would otherwise do, and neither can go stale:
 
-recount grep <needle> --repo <p> [--agent --since --until]
-    Case-insensitive substring, not a regex. Prints (session, line, ts,
-    role, snippet) for every hit.
+**Resolution before reading.** A repository path resolves to the encoded session
+directories of that repo and its worktrees before a single transcript is opened.
+Most of the corpus is eliminated by knowing where to look.
 
-recount explain --repo <p> --event-line <N>
-    Read event N of .pact/events.jsonl and run `at` on it. One command
-    from an audit finding to the testimony.
+**Append-only files have a usable mtime.** Sessions only ever grow, so a file's
+modification time bounds its *last* turn. A file whose mtime precedes the query
+window cannot contain anything inside it, and is skipped without being opened.
 
-recount doctor [--repo <p>]
-    Connector roots, session counts, parse-failure tallies, and whether a
-    join is possible here at all: are there events, are the worktrees the
-    ledger names still on disk.
+That argument is one-directional, and the asymmetry matters more than the
+optimisation: mtime says nothing about a file's *first* turn, so the upper bound
+of a window cannot prune. A symmetric implementation would be faster and would
+silently lose hits. [docs/performance.md](docs/performance.md) carries the
+measurements and the deferral they did not trigger.
 
-recount completion <bash|zsh|fish|elvish|powershell>
-    The completion script for your shell, on stdout alone, generated from
-    the same clap tree the parser uses. Not a `--json` command.
-```
+### Two connectors, and the trait exists so a third stays cheap — not so you add one
 
-`--since` and `--until` take RFC 3339 or a duration ago (`2h`, `1d`). Start with
-`doctor`: it answers "why did that refuse" before you ask.
+The connector interface is two methods, deliberately small enough that a third
+implementation would be one file. There is no plugin registry, no discovery
+mechanism, no configuration naming connectors. Making the extension point cheap
+is not the same as building for extension: a mechanism that makes a third
+connector *easy* is a mechanism to maintain forever, in exchange for a file
+somebody could have written anyway.
 
-## What recount refuses to be
+What the interface does buy is a rule about ownership. A file belongs to the
+most specific connector that recognises it, and it belongs to that connector
+*before* any query window is considered. That ordering was learned the hard way
+and is explained in [docs/connectors.md](docs/connectors.md).
 
-No TUI. No daemon. No network. No embeddings. No fuzzy search —
-case-insensitive substring only. One connector family.
+## What recount deliberately is not
 
-And **no persistence**. Session files are the only truth; recount owns no store
-that can drift from sources it does not own. There is no index, no cache, no
-sidecar, no database. Every command re-reads what is on disk, and every answer
-is therefore about the corpus as it is now rather than as some earlier run
-recorded it.
+No TUI. No daemon. No network access of any kind. No embeddings, no semantic
+search, no ranking model. **No fuzzy search** — matching is case-insensitive
+substring and nothing else, so there is no regex flag to add and no
+almost-matched result to explain. One connector family at launch. And **no
+persistence**: recount owns no store that can drift from sources it does not
+own.
 
-Scans stay cheap structurally instead of by caching:
+These are refusals, not gaps. Each one is a thing that would have to be kept
+correct, kept in step with the coding agents' own formats, and kept honest about
+its own staleness. The tool's job is to answer one audit question well on a
+machine that owns no index; every capability above is load-bearing for a
+different job.
 
-1. `--repo` resolves to the project's encoded session directories — the repo
-   and its worktrees — before any file is opened.
-2. Sessions are append-only, so mtime prunes files outside the query window
-   without opening them. On a real corpus that is the difference between
-   2.0 s and 142 ms.
-
-## Where recount is weak
-
-recount exists because of a misdiagnosis — a confident conclusion drawn from a
-feature that could not discriminate. A README that oversold the tool would be
-the same mistake in a new place.
-
-### The join has a ceiling, and which ceiling depends on how your fleet runs
-
-The join key is topological: `invoked_from` (a worktree name in the ledger) →
-worktree path → session cwd, plus a required time-window overlap, plus a
-transcript-mention tiebreaker. How much that chain can tell you depends
-entirely on the fleet's process topology.
-
-**Topology A, process-per-agent.** Each agent is its own `claude`, started in
-its own worktree. The session's `cwd` *is* the worktree, so the chain
-identifies one session out of the field. This is the case the spec was written
-for, and the only one where topology discriminates.
-
-**Topology B, subagent-per-agent.** Every agent is a subagent of one session,
-and records the **parent's** cwd. Measured on the fleet that built recount: all
-25 subagent transcripts record `/home/chussenot/Documents/recount` and nothing
-else, while the ledger names 26 distinct worktrees those agents were working
-in. Not one transcript names the worktree its own agent was assigned. (The only
-lines that do name a worktree belong to the *orchestrator's* session, which
-`cd`'d into three of them itself.) Under B the chain filters to the right
-*repository* and then stops.
-
-The score ladder, from `src/join.rs`:
-
-| situation | confidence |
-|---|---:|
-| chain singled the session out, + mention (topology A) | 0.95 |
-| chain singled it out, no mention | 0.70 |
-| chain only filtered, + mention (**topology B ceiling**) | 0.65 |
-| chain only filtered, no mention | 0.40 |
-
-The threshold is 0.50. So topology A can answer on topology alone; topology B
-cannot reach 0.50 without the mention tiebreaker, and 0.40 is deliberately
-below the bar — "filtered but did not discriminate, and nothing else spoke" has
-to be a refusal rather than a guess.
-
-### The tool is wrong on this repository's own ledger, and its own output shows it
-
-Of the 160 events in this repo's ledger when
-[`docs/worked-example.md`](docs/worked-example.md) was written, `explain`
-refused 108, matched 49 at 0.65, and matched 3 at 0.95.
-
-Every one of those 49 carries the same evidence line: the chain *"filtered
-without discriminating and the transcript mention decides"*. They are leads,
-not answers.
-
-One of them is demonstrably wrong. Event 122 records the orchestrator holding
-the merge lock; `explain` exits 0 at confidence 0.65 and prints 19 turns of a
-**different agent's** session — the `honesty` agent running `recount doctor` in
-its own worktree. The deciding signal was the word "orchestrator" appearing in
-the *prompt of a peer*, in a sentence every agent in the fleet was handed.
-
-That is the arkanoid-v1 failure mode reproduced live, by the tool built to
-prevent it. It is not hidden, and it is not the point. The point is that a
-reader who looks at the evidence lines instead of the number catches it in
-about ten seconds: the topology line says the chain could not discriminate, the
-overlap line shows the session ended before the event, and the mention line
-quotes boilerplate. **Confidence plus evidence is what lets a reader catch the
-tool being wrong**, which is exactly why the spec forbids a bare answer. A tool
-that printed only the session path would have made the same mistake with no way
-for anyone downstream to see it.
-
-The full case, with both readings side by side, is in
-[`docs/worked-example.md`](docs/worked-example.md) — recount run for real
-against this repository's own ledger and this machine's transcripts, showing
-one join that is right, one that is confidently wrong, and why two thirds of
-the ledger refuses.
-
-### Keep your agent worktrees until the audit is done
-
-108 of those 160 events refuse with `no cwd match`, and they all refuse for the
-same reason: `invoked_from` names worktrees — `skeleton`, `ci`, `join`,
-`cmdexplain`, `bench` — that the orchestrator deleted at each wave barrier.
-
-```
-$ recount explain --repo . --event-line 133
-  …
-  no confident match — reason: no cwd match
-    invoked_from `cmdexplain` names no worktree of this repo (known: `main`, `readme`)
-  no candidate to show: this is a structural refusal, not a weak match. Look at
-  the topology.
-```
-
-The refusal is correct — the worktree is genuinely gone, and guessing would be
-the arkanoid mistake again. But it means **a fleet that tidies up as it goes
-cannot later be audited through the topological chain.** The transcripts still
-exist and the ledger still exists; the link between them lived in the
-filesystem and was deleted.
-
-If you plan to point recount at a finished fleet, decide this before the run,
-not after: keep the agent worktrees until the audit is done, or accept that
-only the transcript-mention signal survives — and on its own that scores 0.40,
-below the bar, so `at` will refuse.
-
-### Known and deliberate
-
-- **`grep` still parses the corpus twice.** Once in `discover_all`, once in the
-  `connector.read` loop, worth ~540 ms of a ~1.0 s unwindowed scan over 200 MB.
-  Removing it honestly requires a change to the `Connector` trait, which nobody
-  was authorised to make. It is a known cost, not an oversight.
-- **`generic_jsonl` cannot be pointed at "any dir of `*.jsonl`".** No command
-  takes a directory; every command takes `--repo`, which resolves into
-  `claude_code`'s own tree, and `generic_jsonl` declares no roots of its own. In
-  practice the fallback only ever gets the paths `claude_code` declines *inside*
-  that tree — on this machine, 12 workflow `journal.jsonl` files under the pact
-  repo, none of which state a cwd, so the join correctly refuses all of them.
-  The spec mandates two connectors; the commands the spec specifies can only
-  really reach one.
-- **The `~/.claude` format notes are reverse-engineered and will drift.**
-  [`docs/format-notes.md`](docs/format-notes.md) was measured on one machine on
-  one day, over a corpus already spanning 22 Claude Code point releases whose
-  field sets disagree with each other. Two passes 2h45m apart already disagreed
-  on the file count, the line count and the field inventory. The connector
-  degrades rather than asserts, and the notes are a snapshot to be
-  re-measured — never a contract.
-
-### Deviations from the spec's literal text
-
-**`recount completion <shell>` is a sixth command, and the one that does not
-take `--json`.** The spec's command list names five and says "all --json; human
-digest second". `completion` writes a shell program to stdout, so a digest
-printed beside it would be sourced as code: `--json` is accepted and ignored
-rather than refused, since the flag is global and erroring on it would turn
-something harmless into a usage error. The alternative was five checked-in
-completion scripts, which are hand-written copies of the CLI and drift from it
-the first time a flag changes.
-
-The spec writes the trait as `discover() -> Vec<SessionMeta>`. The code is
-`discover(dirs, window)`. Taken openly, because the spec's own cheapness
-clauses — "`--repo` resolves to the project's encoded session directories …
-before any file opens", and mtime "prunes files outside the query window
-unopened" — are unsatisfiable if the connector does not learn the scope before
-it opens anything. Still two methods plus `roots()`, so the spec's "a third is
-one file" holds.
-
-## Credit: cass
+### Credit: cass
 
 [cass](https://github.com/Dicklesworthstone/coding_agent_session_search) —
 Dicklesworthstone's coding-agent session search — is the product-scale proof
-that this idea is worth having: ~685k lines, 25 connectors, SQLite + Tantivy,
-embeddings, a TUI, sync, crypto. It is the thing you want if you want to *search
-your agent history*, and it does the whole job properly.
+that the underlying idea is worth having: ~685k lines, 25 connectors, SQLite +
+Tantivy, embeddings, a TUI, sync, crypto. It is what you want if you want to
+*search your agent history*, and it does that job properly.
 
-recount implements the audit-testimony 3% of it and refuses the rest by design.
-The refusals above are not a critique of cass; they are what is left when the
-requirement is narrowed from "search everything" to "answer one audit finding
-with one transcript, on a machine that owns no index". cass earned the general
-case. recount only had to earn one join.
+recount implements the audit-testimony 3% of it and refuses the rest. The
+refusals above are not a critique of cass; they are what remains when the
+requirement narrows from "search everything" to "answer one audit finding with
+one transcript, on a machine that owns no index". cass earned the general case.
+recount only had to earn one join.
 
-## The deferral, and the measurement that did not trigger it
+## Where recount is weak
 
-The spec defers exactly one thing:
+### The join has a ceiling, and which ceiling depends on how your fleet runs
 
-> a metadata-only sidecar manifest (rebuilt wholesale on any mtime mismatch,
-> rm-safe) may be added **iff real windowed queries exceed ~2s on a real
-> corpus — never a content index, never a database**.
+The topological key assumes an agent's session records the directory that agent
+worked in. That holds when each agent is its own process started in its own
+worktree. It does **not** hold when your agents are subagents of one session:
+they all record the parent's working directory, so the chain filters the
+candidates correctly and then cannot tell them apart.
 
-**Not triggered.** A real windowed grep is **138.8 ms**.
+recount detects this rather than papering over it, and caps what such a match
+can score — a topology where the primary key cannot discriminate is not allowed
+to produce a top-confidence answer, and a match resting on nothing but that
+degenerate key scores *below* the confidence bar on purpose.
+[docs/join.md](docs/join.md) has the rungs and the measurements.
 
-```
-cargo test --release --test bench -- --ignored --nocapture
-```
+### The tool is wrong on this repository's own ledger, and its own output shows it
 
-Release, warm page cache, AMD Ryzen 7 PRO 8840HS:
+Run recount against the coordination log of its own construction: of 177 events,
+118 refuse, 3 resolve correctly at top confidence, and **56 resolve to a
+*confident* match that names the wrong session** — every one of them a subagent's
+transcript standing in for the orchestrator event that was actually asked about.
 
-| measurement | result | ceiling |
-|---|---:|---:|
-| pruned `at`, answering path (500 synthetic sessions) | 15.1 ms | 100 ms |
-| unwindowed `grep`, 500 synthetic sessions / 193 MB | 1025.8 ms | 2000 ms |
-| real corpus (~173 MB, 254 sessions), unwindowed `grep` | 1944.8 ms | — |
-| real corpus, `grep --since 24h` | **138.8 ms** | 2000 ms (the clause) |
+Two separate things produce that. The topology filtered without discriminating,
+which is the ceiling working as designed. But among the candidates it could not
+tell apart, the winner is decided by filesystem path order, and that ordering is
+systematically biased against the session that was right — a defect
+(bead `recount-gwx`; the case is walked in
+[docs/join.md](docs/join.md#recount-is-wrong-on-this-repositorys-own-ledger)) rather than a limitation.
 
-Both spec ceilings are met. Re-run twice while writing this README, on a
-machine that still had the fleet on it: 18.5 / 64.2 ms, 1216.9 / 1057.8 ms,
-2475.2 / 1974.5 ms, 142.5 / 142.0 ms. The margins move with load; no verdict
-did.
+This is the arkanoid failure mode, reproduced by the tool built to prevent it.
+It is documented rather than hidden because the machinery worked exactly as
+designed — every one of those matches carries an evidence line stating that the
+chain "filtered without discriminating", which is precisely the sentence that
+tells a reader to treat it as a lead rather than an answer. A reader who takes
+the number at face value is misled. A reader who reads one more line is not.
+That is the whole argument for scoring with evidence, and
+[docs/worked-example.md](docs/worked-example.md) walks the actual case.
 
-Two reasons the manifest stays unbuilt:
+### Keep your agent worktrees until the audit is done
 
-1. **The clause names *windowed* queries, and the mtime prune already does the
-   manifest's job.** Windowed grep opened 6 of 254 sessions and finished in
-   138.8 ms. A manifest would be a second, staler way to learn what one `stat`
-   per file already says. Note that the unwindowed number crossed 2 s on one of
-   the re-runs while the windowed one did not move — which is the clause
-   working exactly as written.
-2. **A manifest holds metadata, so it could only ever remove the first of
-   `grep`'s two parses.** The character scan cannot be removed by anything that
-   is not a content index, and the spec forbids a content index. When the
-   unwindowed grep was 2915 ms, 2105 ms of it was that scan; it came down by
-   fixing the scan, not by adding a store. Read the bench's printed
-   decomposition before reaching for a manifest.
+If your fleet deletes each agent's worktree when its work lands, the topological
+chain has nothing left to resolve: the ledger names a path that no longer
+exists. recount refuses correctly in that situation — the worktree is genuinely
+gone — but the refusals are unrecoverable, and they are most of this
+repository's own ledger for exactly that reason.
 
-## Docs
+Audit first, tidy second. Or accept that only the mention signal survives, with
+the ceiling that implies.
 
-- [`docs/spec.md`](docs/spec.md) — the contract. Where quote and code disagree,
-  the quote wins.
-- [`docs/worked-example.md`](docs/worked-example.md) — recount run for real
-  against its own birth: one correct join, one confidently wrong one, and 108
-  refusals with a fleet-practice finding behind them.
-- [`docs/format-notes.md`](docs/format-notes.md) — the observed `~/.claude`
-  layout. Reverse-engineered, expect drift.
+### Known and deliberate
+
+The `~/.claude` format notes are reverse-engineered from one machine and will
+drift; [docs/format-notes.md](docs/format-notes.md) says so in those words and
+carries its observation date. `grep` still parses each file once more than it
+needs to, because removing that pass honestly requires a change to the connector
+interface that has not been justified yet. And while the fallback connector is
+reachable, in practice it only ever receives what the primary connector
+declines, because no command accepts a bare directory.
+
+### Deviations from the spec's literal text
+
+[docs/spec.md](docs/spec.md) is committed verbatim as the contract this tool was
+built against. Where the code departs from it, the departure is recorded here
+rather than edited into the spec:
+
+**`recount completion <shell>` is a sixth command, and the one that does not
+take `--json`.** The spec's command list names five and says "all `--json`;
+human digest second". `completion` writes a shell program to stdout, so a digest
+beside it would be sourced as code. The alternative was checked-in completion
+scripts, which are hand-written copies of a CLI and drift from it the first time
+a flag changes.
+
+**The connector's `discover` takes the scan scope as an argument.** The spec
+writes it as taking nothing. But the spec's own cheapness clauses — resolve the
+session directories "before any file opens", and prune outside the window
+"unopened" — are unsatisfiable if the connector cannot learn the scope before it
+opens anything. Still two methods plus `roots()`, so the spec's "a third is one
+file" holds.
+
+## Where this design came from
+
+recount was built by a fleet of 26 coordinated agents against a specification
+frozen before any code was written, and most of what is documented above is a
+finding rather than a plan.
+
+The topology ceiling was discovered by an agent surveying 169,775 lines of real
+transcripts and noticing that its own fleet's sessions never named the worktrees
+they worked in. The separation of *declined* from *damaged* lines exists because
+`doctor` shipped a sentence claiming twelve transcripts were corrupt when the
+corpus had zero corruption — the twelve were one 9.6-million-character prompt
+that had quoted itself into a size cap. The connector ownership rule exists
+because a `--until` query was presenting real transcripts as empty. None of
+those were caught by the test suite; all three were obvious the first time
+someone pointed the tool at its own repository, which is why doing that is a
+task rather than a habit.
+
+The full account, including what the coordination audit could and could not
+verify afterwards, is in the beads and in `.plan/checkpoints/`.
+
+## Documentation
+
+| Page | What it answers |
+|---|---|
+| [docs/cli.md](docs/cli.md) | Every command, flag, exit code and JSON shape — the contract |
+| [docs/install.md](docs/install.md) | Installing, the task runner, shell completions |
+| [docs/join.md](docs/join.md) | The topological key, the score ladder, refusals, the two topologies |
+| [docs/connectors.md](docs/connectors.md) | The two connectors, the claim rule, declined vs damaged |
+| [docs/format-notes.md](docs/format-notes.md) | The reverse-engineered `~/.claude` layout, and its drift warning |
+| [docs/performance.md](docs/performance.md) | The mtime prune, the measured ceilings, the deferral |
+| [docs/worked-example.md](docs/worked-example.md) | One real finding replayed end to end, including a wrong answer |
+| [docs/development.md](docs/development.md) | Building, testing, and why each gate exists |
+| [docs/spec.md](docs/spec.md) | The frozen contract. Never edited; deviations are recorded above |

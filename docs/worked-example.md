@@ -1,5 +1,14 @@
 # Worked example: recount's first testimony is about its own birth
 
+> **This is a dated replay, not a live report.** Every command below was run
+> against a 160-event ledger on 2026-08-19. The ledger has since grown to 177
+> events and the last agent worktrees have been deleted, so the sweep now reads
+> 118 refused / 56 at 0.65 / 3 at 0.95, and the `known:` worktree lists no
+> longer reproduce. The *shape* of every case here is unchanged, and
+> [join.md](join.md#recount-is-wrong-on-this-repositorys-own-ledger) carries the
+> current numbers. Kept as-is deliberately: a replay that is quietly re-run
+> every time the corpus moves is not a replay.
+
 Run for real on 2026-08-19 against this repository's own
 `.pact/events.jsonl` (160 events) and this machine's `~/.claude/projects`
 (839 sessions). Every command output below was executed and pasted. Where
