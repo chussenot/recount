@@ -72,6 +72,14 @@
 //! motivates it: case mappings that change character count (`İ`, `ẞ`) do not
 //! fold. `é`/`É` and `σ`/`Σ` do.
 //!
+//! Two ASCII characters take a fast path — [`char::eq_ignore_ascii_case`],
+//! which is the same answer for that pair and does not build an iterator. The
+//! test is on *both* characters, not one: `K` (U+212A) lowercases to ASCII `k`
+//! and must keep folding with it. That one branch was 1.75 s of a 2.8 s
+//! unwindowed `grep` over 200 MB (recount-hwk.47) — the old code built two
+//! `ToLowercase` iterators per haystack character, for every character of
+//! every turn, to reject a first-character test that almost always fails.
+//!
 //! # `--agent` filters on a guess, and says so
 //!
 //! There is no record of which fleet agent ran a session — [`crate::cmd::sessions`]
@@ -449,7 +457,15 @@ fn find_ci(hay: &str, needle: &[char], from: usize) -> Option<(usize, usize)> {
 /// Equal ignoring case. `char::to_lowercase` because `é`/`É` must fold and
 /// `eq_ignore_ascii_case` would not; the mappings that change character count
 /// (`İ`, `ẞ`) do not fold, which the module doc states.
+///
+/// The ASCII pair is answered without it, and only when **both** sides are
+/// ASCII: `K` (U+212A) is not, and lowercases to ASCII `k`, so a one-sided test
+/// would stop folding a pair that folds today. See the module doc for what the
+/// iterator cost.
 fn eq_ci(a: char, b: char) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        return a.eq_ignore_ascii_case(&b);
+    }
     a == b || a.to_lowercase().eq(b.to_lowercase())
 }
 
@@ -1056,6 +1072,16 @@ mod tests {
         assert_eq!(ci("The ARKANOID case", "arkanoid"), Some("ARKANOID"));
         assert_eq!(ci("café", "CAFÉ"), Some("café"));
         assert_eq!(ci("ΣΙΓΜΑ", "σιγμα"), Some("ΣΙΓΜΑ"));
+        // The half-ASCII pair the fast path must not swallow: `K` is U+212A,
+        // the Kelvin sign, and it lowercases to plain ASCII `k`. Only a test on
+        // *both* sides keeps this folding.
+        assert_eq!(ci("100 K", "k"), Some("K"));
+        assert_eq!(ci("kelvin", "K"), Some("k"));
+        // Still deliberately unfolded, fast path or not: a mapping that changes
+        // the character count has no offset in the haystack to return. See the
+        // module doc.
+        assert_eq!(ci("İstanbul", "i̇stanbul"), None);
+        assert_eq!(ci("STRASSE", "straße"), None);
         assert_eq!(ci("abc", "d"), None);
         // Not a regex, by design: the metacharacters are literals.
         assert_eq!(ci("a.c", "a.c"), Some("a.c"));

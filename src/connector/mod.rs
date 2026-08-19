@@ -42,6 +42,17 @@
 //! it is last in [`registry`], so it only ever reports what the specific
 //! connector declined.
 //!
+//! And when there is nothing left to decline, it is not asked. The dedup was
+//! always after the fact: the fallback parsed every file in the tree so that
+//! [`discover_all`] could drop every result as already-claimed. `discover` is a
+//! full parse, so that cost a second reading of the whole corpus for nothing:
+//! 230 ms of a 2.9 s unwindowed `grep` over 200 MB, and a third of what
+//! `sessions` and `at` spend discovering (recount-hwk.47). [`discover_all`] now
+//! lists the offerable paths first, from the same directory walk and mtime
+//! prune the connectors use, and stops once they are all spoken for. The rule
+//! it rests on is the one above: the claim is by path, so a connector with no
+//! unclaimed path to be offered has no answer to give.
+//!
 //! # Claiming is recognition, and the window is applied after it
 //!
 //! A connector claims a path by **recognising** it, not by having something to
@@ -96,6 +107,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::model::{SessionMeta, TimeWindow, Turn};
+use crate::prune;
 
 pub mod claude_code;
 pub mod generic_jsonl;
@@ -159,9 +171,23 @@ pub fn discover_all(
     dirs: &[PathBuf],
     window: &TimeWindow,
 ) -> Vec<SessionMeta> {
+    // Every path a connector can be offered, listed before anything opens: the
+    // same walk the connectors do, plus the same one-sided mtime prune. Cheap
+    // — `read_dir` entries and one `stat` each, no file content.
+    let offerable = prune::partition(&candidates(dirs), window).opened;
     let mut claimed: BTreeSet<PathBuf> = BTreeSet::new();
     let mut out = Vec::new();
     for connector in connectors {
+        // Nothing left for this connector to claim, so it is not asked.
+        // `discover` is a full parse of every file it is offered, and a
+        // fallback whose every result is about to be dropped as already-claimed
+        // parses the whole corpus to produce nothing (recount-hwk.47). It was
+        // always waste: the dedup below has always been after the fact. Skipping is sound
+        // because the claim is by path — a connector offered no unclaimed path
+        // can contribute no surviving `SessionMeta`.
+        if offerable.iter().all(|path| claimed.contains(path)) {
+            break;
+        }
         for meta in connector.discover(dirs, window) {
             // The claim is recorded first and unconditionally — `insert` runs
             // before `&&` short-circuits — so a path the window excludes is
