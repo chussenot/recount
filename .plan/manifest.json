@@ -248,7 +248,8 @@
       "recount-hwk.41",
       "recount-hwk.37",
       "recount-hwk.40",
-      "recount-hwk.39"
+      "recount-hwk.39",
+      "recount-hwk.47"
     ]
   },
   {
@@ -300,6 +301,18 @@
       "recount-hwk.38",
       "recount-hwk.29",
       "recount-hwk.26"
+    ]
+  },
+  {
+    "id": "recount-hwk.47",
+    "wave": 7,
+    "files": [
+      "src/cmd/grep.rs"
+    ],
+    "depends_on": [
+      "recount-hwk.40",
+      "recount-hwk.34",
+      "recount-hwk.46"
     ]
   }
 ]
