@@ -27,6 +27,47 @@
 //! cannot silently become a false non-overlap. `Utc` specifically, not `Local`:
 //! an audit read on a different machine, or after a DST change, must reach the
 //! same verdict. chrono is already in the dependency budget.
+//!
+//! **Why a keyed answer is a [`Tier`] and not a fifth rung on the ladder.**
+//! The four scores in `join.rs` are calibrated *inference*: they exist because
+//! no signal is certain. pact 0.11.0 changed the question for events that
+//! carry `harness_subagent` — the event NAMES the transcript, resolution is a
+//! path join and a `stat`, and there is nothing probabilistic left. Giving
+//! that 0.99 would put an identity on the same axis as a guess and invite a
+//! reader to compare them, which is the confident-inference failure this tool
+//! exists to prevent. So the answer says *how it was reached* first, and only
+//! a topological answer carries a number.
+//!
+//! The shape is `enum Tier { Topological(Confidence), Keyed }` — the score is
+//! *inside* the inferring variant — rather than a `Tier` beside an
+//! `Option<Confidence>`. Two fields can disagree: `(Keyed, Some(0.99))` is
+//! representable, so someone eventually writes it, and every reader then needs
+//! to know which field wins. With the score inside the variant there is no
+//! `f64` on the keyed arm to print, unwrap, or compare — a caller that wants
+//! one has to `match`, and the keyed arm has nothing to hand back. Wrong
+//! thing unrepresentable beats wrong thing discouraged. [`Confidence`] itself
+//! stays a plain clamped number for the same reason: a `Confidence::Keyed`
+//! variant would make `value()` fallible and every existing caller would
+//! reach for an `unwrap_or`, which is the fake score arriving by the back
+//! door.
+//!
+//! **What that serialises to.** `Tier` writes two fields, meant to be
+//! `#[serde(flatten)]`ed where a `confidence: Confidence` field sits today:
+//!
+//! ```json
+//! { "tier": "keyed",       "confidence": null }
+//! { "tier": "topological", "confidence": 0.65 }
+//! ```
+//!
+//! `.confidence` stays exactly what it is today — a number produced by the
+//! four-rung ladder, against the same `CONFIDENT` threshold — for every answer
+//! that was inferred. A keyed answer puts `null` there, on purpose and
+//! explicitly rather than by omitting the key: a script that reads
+//! `.confidence` and compares it to a threshold gets `null`, which fails the
+//! comparison loudly instead of silently ranking an identity against a guess.
+//! Such a script is now *incomplete*, not wrong, and the fix is one field
+//! away. Deserialising is strict in the same direction: `{"tier":"keyed",
+//! "confidence":0.99}` is rejected, not quietly honoured.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -228,11 +269,137 @@ impl fmt::Display for Confidence {
     }
 }
 
-/// The three signals the spec names for the join, and nothing else. A fourth
-/// would be a change to the spec, not a new variant.
+/// How an answer was reached: named, or inferred.
+///
+/// The ladder, and the whole argument for this shape, is in the module doc.
+/// Variant order *is* the ladder — `Topological` below, `Keyed` above — so the
+/// derived `PartialOrd` ranks any keyed answer over every score, and two
+/// topological answers against each other.
+//
+// Nothing constructs a `Tier` until the join bead (recount-1cw.5) does, and
+// this crate is a binary, so `pub` does not count as a use. The `not(test)`
+// cfg means the expectation is fulfilled only in the build where the type is
+// genuinely unreferenced — when the join starts calling it, the expectation
+// goes unfulfilled and the build tells that bead to delete these four
+// attributes.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(try_from = "TierRepr", into = "TierRepr")]
+#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
+pub enum Tier {
+    /// Inferred, by the four-rung ladder in `join.rs`, against `CONFIDENT`.
+    /// The number means what it has always meant.
+    Topological(Confidence),
+    /// The event named the transcript. There is no `f64` here because there is
+    /// nothing left to be uncertain about; see [`Signal::Keyed`].
+    Keyed,
+}
+
+#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
+impl Tier {
+    /// The score, when there is one. `None` for a keyed answer, and there is
+    /// no default to substitute: an identity has no position on the ladder.
+    pub fn confidence(self) -> Option<Confidence> {
+        match self {
+            Tier::Topological(c) => Some(c),
+            Tier::Keyed => None,
+        }
+    }
+
+    /// Does this answer stand? The one place the threshold is applied, so no
+    /// caller re-derives it and drops a keyed hit for having no number: keyed
+    /// clears every bar, including 1.0.
+    pub fn clears(self, threshold: f64) -> bool {
+        match self {
+            Tier::Keyed => true,
+            Tier::Topological(c) => c.value() >= threshold,
+        }
+    }
+
+    /// The word this tier serialises as, so human output and `--json` cannot
+    /// drift apart.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tier::Keyed => "keyed",
+            Tier::Topological(_) => "topological",
+        }
+    }
+}
+
+/// `keyed`, or the two decimals a [`Confidence`] prints. Deliberately not a
+/// number in both cases: there is no number in one of them.
+impl fmt::Display for Tier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Tier::Keyed => f.write_str("keyed"),
+            Tier::Topological(c) => c.fmt(f),
+        }
+    }
+}
+
+/// The wire shape of a [`Tier`]: the two flat fields, meant to be
+/// `#[serde(flatten)]`ed into whatever carries the answer.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
+struct TierRepr {
+    tier: TierName,
+    /// Always written, `null` for keyed — see the module doc. `default` on the
+    /// way in so `{"tier": "keyed"}` is also accepted.
+    #[serde(default)]
+    confidence: Option<Confidence>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(not(test), expect(dead_code, reason = "join lands in recount-1cw.5"))]
+enum TierName {
+    Keyed,
+    Topological,
+}
+
+impl From<Tier> for TierRepr {
+    fn from(t: Tier) -> Self {
+        TierRepr {
+            tier: match t {
+                Tier::Keyed => TierName::Keyed,
+                Tier::Topological(_) => TierName::Topological,
+            },
+            confidence: t.confidence(),
+        }
+    }
+}
+
+impl TryFrom<TierRepr> for Tier {
+    type Error = String;
+
+    fn try_from(r: TierRepr) -> std::result::Result<Self, String> {
+        match (r.tier, r.confidence) {
+            (TierName::Keyed, None) => Ok(Tier::Keyed),
+            (TierName::Topological, Some(c)) => Ok(Tier::Topological(c)),
+            (TierName::Keyed, Some(c)) => Err(format!(
+                "tier \"keyed\" carries confidence {c}: a keyed answer is an identity, not a score"
+            )),
+            (TierName::Topological, None) => {
+                Err("tier \"topological\" without a confidence".to_string())
+            }
+        }
+    }
+}
+
+/// What a piece of evidence is evidence *of*.
+///
+/// Three of these are the scored signals the original spec named for the
+/// join. The fourth, [`Signal::Keyed`], arrived with pact 0.11.0 and is a
+/// change to the spec rather than a new way to score: it is not weighed
+/// against the other three, it replaces them. An event that names its
+/// transcript is resolved by a path join and a `stat`, so the evidence for it
+/// is a filename, and the answer it produces is [`Tier::Keyed`] — no number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Signal {
+    /// The event carried `harness_subagent`, and the transcript it names is on
+    /// disk: `.../<session>/subagents/agent-<id>.jsonl`. Not scored — the file
+    /// is there or it is not.
+    Keyed,
     /// `invoked_from -> worktree path -> session cwd`.
     Topology,
     /// Required overlap between the event window and the session window.
@@ -241,9 +408,10 @@ pub enum Signal {
     TranscriptMention,
 }
 
-/// Why a score is what it is. The spec: "Scored match that always reports
-/// confidence and evidence, never a bare answer" — so every scored result
-/// carries a non-empty `Vec<Evidence>`.
+/// Why an answer is what it is. The spec: "Scored match that always reports
+/// confidence and evidence, never a bare answer" — so every result carries a
+/// non-empty `Vec<Evidence>`, a keyed one included: it has no score to
+/// explain, but it still has to say which file it was named by.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Evidence {
     pub signal: Signal,
@@ -374,11 +542,87 @@ mod tests {
             Duration::minutes(5),
         ));
         rt(Signal::TranscriptMention);
+        rt(Signal::Keyed);
         rt(Evidence::new(Signal::Topology, "invoked_from=skeleton"));
+        rt(Evidence::new(
+            Signal::Keyed,
+            "harness_subagent=acf8cbc94118744f1 -> .../subagents/agent-acf8cbc94118744f1.jsonl",
+        ));
+        rt(Tier::Keyed);
+        rt(Tier::Topological(Confidence::new(0.65)));
         // Confidence is not Eq (it holds an f64), so it is checked by hand.
         let c = Confidence::new(0.75);
         let back: Confidence = serde_json::from_str(&serde_json::to_string(&c).unwrap()).unwrap();
         assert_eq!(c, back);
+    }
+
+    /// The two lines of JSON the whole bead is about. `at`, `explain`,
+    /// `sessions` and `testify` all render this, so it is pinned literally.
+    #[test]
+    fn a_keyed_answer_serialises_a_null_confidence() {
+        assert_eq!(
+            serde_json::to_string(&Tier::Keyed).unwrap(),
+            r#"{"tier":"keyed","confidence":null}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&Tier::Topological(Confidence::new(0.65))).unwrap(),
+            r#"{"tier":"topological","confidence":0.65}"#
+        );
+    }
+
+    /// How `join::Match` will carry it: two flat fields where `confidence`
+    /// sits today, not a nested object.
+    #[test]
+    fn tier_flattens_into_the_answer() {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Answer {
+            agent: String,
+            #[serde(flatten)]
+            tier: Tier,
+        }
+
+        let a = Answer {
+            agent: "tier".into(),
+            tier: Tier::Keyed,
+        };
+        let json = serde_json::to_string(&a).unwrap();
+        assert_eq!(json, r#"{"agent":"tier","tier":"keyed","confidence":null}"#);
+        assert_eq!(a, serde_json::from_str::<Answer>(&json).unwrap());
+    }
+
+    /// A score on a keyed answer is the failure this type exists to prevent,
+    /// so it is not merely unconstructible in Rust — it is rejected on the way
+    /// in as well.
+    #[test]
+    fn a_keyed_tier_cannot_carry_a_score() {
+        let err = serde_json::from_str::<Tier>(r#"{"tier":"keyed","confidence":0.99}"#)
+            .expect_err("keyed + a score must not deserialise");
+        assert!(err.to_string().contains("identity, not a score"), "{err}");
+        assert!(serde_json::from_str::<Tier>(r#"{"tier":"topological"}"#).is_err());
+        // Tolerant the other way: an omitted null is still keyed.
+        assert_eq!(
+            serde_json::from_str::<Tier>(r#"{"tier":"keyed"}"#).unwrap(),
+            Tier::Keyed
+        );
+    }
+
+    #[test]
+    fn keyed_outranks_every_score() {
+        assert!(Tier::Keyed > Tier::Topological(Confidence::new(1.0)));
+        assert!(Tier::Topological(Confidence::new(0.7)) > Tier::Topological(Confidence::new(0.65)));
+        // The threshold is applied in one place, and keyed clears every bar.
+        assert!(Tier::Keyed.clears(1.0));
+        assert!(Tier::Topological(Confidence::new(0.65)).clears(0.5));
+        assert!(!Tier::Topological(Confidence::new(0.4)).clears(0.5));
+        // No number to print for a keyed answer, and no default standing in.
+        assert_eq!(Tier::Keyed.confidence(), None);
+        assert_eq!(Tier::Keyed.to_string(), "keyed");
+        assert_eq!(Tier::Topological(Confidence::new(0.65)).to_string(), "0.65");
+        assert_eq!(Tier::Keyed.name(), "keyed");
+        assert_eq!(
+            Tier::Topological(Confidence::new(0.4)).name(),
+            "topological"
+        );
     }
 
     #[test]

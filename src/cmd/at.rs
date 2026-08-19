@@ -576,11 +576,12 @@ fn stamp(t: Option<DateTime<Utc>>) -> String {
     }
 }
 
-/// A [`Signal`] in words, for the digest; the JSON spells the same three via
+/// A [`Signal`] in words, for the digest; the JSON spells the same four via
 /// serde. A private copy of `sessions`'s, because it is five lines and sharing
 /// it would mean editing a file this bead does not own.
 fn signal_words(signal: Signal) -> &'static str {
     match signal {
+        Signal::Keyed => "keyed",
         Signal::Topology => "topology",
         Signal::TimeOverlap => "time overlap",
         Signal::TranscriptMention => "transcript mention",
