@@ -894,3 +894,160 @@ surfaces none of them and says so in its module doc. **This is a real
 capability gap, not a nothing:** a fleet that used Claude Code's native
 worktrees would be joinable exactly and precisely, and recount would miss it.
 The 417 lines are here whenever that is worth the field on `Identity`.
+
+---
+
+## 10. Can a subagent learn its own transcript id?
+
+**Observed: 2026-08-19 ~13:10Z**, by two agents (`discovery-alpha`,
+`discovery-beta`) spawned in the same wave, on the same machine as everything
+above. Claude Code `2.1.234`. Four candidate recipes tested; one works.
+
+> **REVERSE-ENGINEERED, EXPECT DRIFT — and harder here than anywhere else in
+> this document.** §§0–9 describe files Anthropic writes and we read. This
+> section describes *when* those files are written relative to when a model
+> runs, which is scheduler behaviour with no published contract, no stability
+> promise, and no version to pin. The recipe below is guarded so that drift
+> makes it stop working rather than start lying. Keep the guard.
+
+The question: an agent needs to stamp its own `harness_subagent` on the events
+it writes, so a post-hoc join (§4.3) has an exact key instead of three
+heuristics. Only the agent can do this at write time. Can it find out which
+`agent-<hex>.jsonl` in `<session>/subagents/` is its own?
+
+### 10.1 Environment — no, and not by accident
+
+Every `CLAUDE_*` variable visible to a subagent's `Bash` call is either a
+boolean or a property of the *parent*:
+
+| Variable | Value in a subagent | Discriminates? |
+|---|---|---|
+| `CLAUDE_CODE_CHILD_SESSION` | `1` | No — says *that* you are a subagent, never *which* |
+| `CLAUDE_CODE_SESSION_ID` | the PARENT session uuid | No — identical for every agent in the session |
+| `CLAUDE_PID` | `1165585` | No — one `claude` process for all of them |
+| `CLAUDE_CODE_MESSAGING_SOCKET` | `/run/user/1000/cc-socks/1165585.sock` | No — keyed to that same PID |
+| `CLAUDE_CODE_MESSAGING_TOKEN` | one hex token | No — per session, not per agent |
+
+The process tree walked to PID 1 shows **no per-subagent process at all**.
+Subagents are not forks; they are turns inside one process. So no command line,
+no `/proc` entry and no socket path can ever carry a per-agent id, and no
+future version can add one without changing the execution model. `pact
+doctor`'s "no harness exposes this" is literally accurate.
+
+### 10.2 Newest `agent-*.jsonl` by mtime — RETURNS THE WRONG AGENT
+
+This is the recipe everyone writes first, and it is the reason this section
+exists. At its own first tool call, **each of the two concurrent agents saw the
+other's transcript as newest**:
+
+| Agent | Its first tool call | Newest `agent-*.jsonl` at that moment | Whose file that is |
+|---|---|---|---|
+| `discovery-alpha` | 13:10:52Z | `agent-a2ef327089565aabf.jsonl` | **beta's** |
+| `discovery-beta` | 13:10:50Z | `agent-aa62c2dc30a940abe.jsonl` | **alpha's** |
+
+A perfectly symmetric mutual misattribution. Both would have exported the
+other's id — silently, with a well-formed, plausible, wrong value. Re-sampled
+~90 s later the ordering had flipped, so this is not a narrow startup window:
+mtime tracks whoever is mid-inference, which is *by construction* the agent
+that is not currently running a tool.
+
+Birth time is no better. `btime` was 13:10:22.73 (alpha) and 13:10:35.18
+(beta) — correctly ordered, and useless, because an agent cannot know whether
+it was first or last in its wave.
+
+> **This recipe must never ship, in any form, including as a fallback.** A
+> wrong id is worse than an absent one. `harness_subagent=<absent>` is honest
+> and the post-hoc join (§4.3) still runs; a wrong id is a corrupted
+> attribution chain that looks correct, in the one file whose entire purpose is
+> to be believed.
+
+### 10.3 Marker grep — yes, on the first tool call
+
+Grep the session's subagent transcripts for a string that appears in *your*
+prompt and nobody else's, then read `agentId` out of the file that matches.
+Two variants, both verified:
+
+- **Orchestrator-planted nonce** in the spawn prompt (alpha and beta both).
+- **Self-minted marker**, written inline in the agent's own first `tool_use`
+  (beta, with `ZZmarker-9f3b71c4-selftest`). This needs no orchestrator
+  cooperation at all — the agent invents the string and searches for it in the
+  same command.
+
+It works because **the prompt is on disk ~22 seconds before the model emits a
+token.** Measured on alpha: prompt record written `13:10:22.564Z`, first
+assistant token `13:10:44.939Z`, first tool call `13:10:52.4Z`. The same holds
+for the self-minted variant: a `tool_use` block is flushed to the transcript
+*before* the tool runs, so by the time the shell executes, the marker the
+command contains is already a line in the file the command is grepping. There
+is no window in which an agent is running but its marker is not yet written.
+
+Two traps, both real:
+
+- **The marker must be literal in the command text.** The command itself is
+  written to the transcript, so a self-minted marker will match its own echo.
+  That is fine when the marker is yours and only yours — one file still
+  matches. It is *not* fine for a planted nonce you are trying to prove came
+  from the prompt: alpha guarded against self-fulfilment by splitting the
+  literal (`'RCNT-N0NCE-ALPHA-''7f3c1d9e2b'`) so the contiguous string never
+  appeared in the command, then confirmed the single match was on line 1 — the
+  prompt record — and not on its own echoed command.
+- **Do not build the marker from a variable** for the same reason in reverse:
+  if the assembled string never appears literally in the flushed `tool_use`,
+  the self-minted variant has nothing to find.
+
+### 10.4 The guard: exactly one match, or nothing
+
+Both agents arrived at this independently, and it is not optional.
+
+```
+matches == 1  → export the id read from that file's `agentId`
+matches != 1  → leave it UNSET; the orchestrator's post-hoc mapping owns it
+```
+
+Zero matches, two matches, ten matches: all the same answer, which is silence.
+This converts every untested edge in §10.6 — resumed sessions, nested agents, a
+parent leaking its own nonce into a child's prompt — from a silent
+misattribution into a loud, honest absence. The failure mode of the guard is
+that the field is missing. The failure mode without it is §10.2.
+
+### 10.5 Sidecars — what they can and cannot key
+
+`agent-<hex>.meta.json` (§3.4) carries `agentType`, `description`, `toolUseId`,
+`spawnDepth`. Against this question:
+
+- **`description`** — all 30 descriptions in the observed session happen to be
+  unique, so it works *here*. It is free text chosen by the caller: two
+  `"run the tests"` agents in one wave collide silently, and it costs the
+  orchestrator exactly as much discipline as planting a nonce, with none of the
+  guarantee. Use it for labelling, never for keying.
+- **`toolUseId`** — would be a perfect key, and the harness does not expose it
+  to the agent. It is the **orchestrator's** key: the spawner knows which
+  `toolu_…` it issued, so this is the cleanest join for the post-hoc fallback.
+- **`agentId`** — appears on every line of the transcript and equals the
+  filename stem. Useless for discovery (you need the file first), authoritative
+  for verification. This is why the recipe reads the id out of that field
+  rather than parsing it off the filename: if the two ever diverge, the field
+  is the one the connector reads (§9.1).
+
+### 10.6 Untested — say so
+
+- **Whether the `SubagentStart` hook payload carries an agent id.** This would
+  beat the recipe outright: no grep, no marker, no race, and it could export
+  the variable *before* the agent's first token. A payload-dumping hook was
+  installed and a probe agent spawned; nothing was captured, because Claude
+  Code loads `settings.json` at session start and a hook added mid-session does
+  not register. **Inconclusive, not negative.** It needs a fresh session, and
+  it is the highest-value follow-up in this section.
+- **Resumed sessions.** Whether an old prompt record containing a stale marker
+  survives a resume, and what that does to the match count. Untested; the guard
+  turns it into an absence.
+- **Nested subagents.** `spawnDepth` was `1` for all 30 agents observed (and
+  all 32 at write time). A `spawnDepth > 1` agent whose parent's prompt quoted
+  the same nonce would see two matches — again, an absence, not a lie.
+- **A relocated `CLAUDE_CONFIG_DIR`.** Unset on this machine, so the
+  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` branch of the recipe has never been
+  exercised.
+- **Cost at scale.** 30 files, largest 787 KB, sub-100 ms here. A session with
+  hundreds of transcripts has not been measured; if it ever matters, `grep -l`
+  short-circuits per file and the marker is a fixed string, so `grep -F` is the
+  first knob.

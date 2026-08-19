@@ -286,9 +286,49 @@ These rules are additive to the protocol block above and outlive any one wave.
 - **Release before you exit.** `pact lease release --all` is the last thing you
   run, before or after your close message but never after your process is gone.
   A lease outliving its agent is how a fleet deadlocks for 45 minutes.
-- **Bead id goes in `--note`.** The installed pact (0.10.7) has no `--bead`
-  flag on `lease acquire`; put `recount-<id>: <what>` in `--note` so
+- **Bead id goes in `--note`.** The installed pact (0.11.0, and 0.10.7 before
+  it) has no `--bead` flag on `lease acquire` — `--agent --ttl --json --steal
+  --note` is the whole option list. Put `recount-<id>: <what>` in `--note` so
   `pact log` and `pact audit --check claim-lease-divergence` can correlate.
 - **Lease narrow.** Claim the files in your bead's `files:` list, nothing else.
   Intra-wave overlap was linted out at planning time — if you find yourself
   wanting a file you did not plan for, that is a message, not a lease.
+- **Resolve your own transcript id on your FIRST tool call, and export it.**
+  pact stamps `harness_subagent` on every event you write, which is the only
+  exact key a post-hoc join has (`docs/format-notes.md` §4.3). Nothing in the
+  environment tells you which `agent-<hex>.jsonl` is yours (§10.1), so grep for
+  a marker you put in the command itself:
+
+  ```sh
+  SD=$(ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$CLAUDE_CODE_SESSION_ID"/subagents 2>/dev/null | head -1)
+  M='PACT-SELFID-<your-agent-name>-<random-hex>'   # literal, unique to you
+  hits=$(grep -l -- "$M" "$SD"/agent-*.jsonl 2>/dev/null)
+  n=$(printf '%s\n' "$hits" | grep -c .)
+  if [ "$n" = 1 ]; then
+    id=$(grep -m1 -o '"agentId":"[^"]*"' "$hits" | cut -d'"' -f4)
+    echo "PACT_HARNESS_SUBAGENT=$id"
+  else
+    echo "AMBIGUOUS ($n matches) — leave unset and say so in your report"
+  fi
+  ```
+
+  **The marker must appear literally in the command text.** Your `tool_use`
+  block is flushed to your transcript before the tool runs, so the string is
+  already on disk when `grep` reads it — that is the whole mechanism. Build it
+  from a shell variable and there is nothing to find.
+
+  **Exactly one match or nothing.** Zero, two, or more means leave
+  `PACT_HARNESS_SUBAGENT` unset and let the orchestrator map you after the
+  fact. Never fall back to "newest `agent-*.jsonl` by mtime": measured, two
+  concurrent agents each resolved to the OTHER's file (§10.2). An absent id is
+  honest; a wrong one is a corrupted attribution chain that looks correct.
+
+- **The identity contract with your spawner**: the spawner sets `PACT_MODEL`
+  (it knows what it asked for) and `PACT_AGENT`; you resolve
+  `PACT_HARNESS_SUBAGENT` (only you can). Then export all three at the top of
+  **every** shell command that calls `pact` — each `Bash` tool call is a fresh
+  shell and keeps nothing from the last one:
+
+  ```sh
+  export PACT_AGENT=<name> PACT_MODEL=<model> PACT_HARNESS_SUBAGENT=<id>
+  ```
