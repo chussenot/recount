@@ -1,13 +1,2 @@
 /target
-
-# Beads / Dolt files (added by bd init)
-.dolt/
-*.db
-.beads-credential-key
-.beads/proxieddb/
-
-# Everything pact or an agent writes under .pact/ is local runtime state,
-# EXCEPT the two append-only logs below, which are history and belong in git.
-.pact/*
-!.pact/events.jsonl
-!.pact/messages.jsonl
+/wt
