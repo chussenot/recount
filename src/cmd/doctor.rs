@@ -32,7 +32,27 @@
 //! The connector section is a **whole-machine** sweep: `roots()` with an
 //! unbounded window, exactly as [`crate::connector`]'s trait doc specifies,
 //! because "how many sessions does this connector see at all, and how many are
-//! damaged?" is not a question about any one repo. The join-readiness section
+//! damaged?" is not a question about any one repo.
+//!
+//! # Declined is not damaged, and doctor is where that mattered
+//!
+//! This command used to print, on the machine recount was written on:
+//!
+//! ```text
+//! connector claude_code: 12 unparseable lines across 6 of 826 sessions
+//!   — those transcripts are damaged, not merely skipped
+//! ```
+//!
+//! Every clause of it was false. `docs/format-notes.md` §5.1 checked: **zero**
+//! JSON errors in that corpus, over two independent passes of 333,408 lines.
+//! All 12 were lines the connector *declined* at its 8 MB cap — one runaway
+//! self-escaping prompt, twice each in six sibling files written six minutes
+//! apart, in transcripts that are byte-perfect. A reader shown that finding
+//! would have gone hunting corruption that does not exist.
+//!
+//! recount exists because of a misdiagnosis. So doctor now reports the two
+//! tallies [`crate::model::SessionMeta`] separates — declined and damaged —
+//! and says which is which, in words, even when one of them is zero. The join-readiness section
 //! is **repo-scoped** and opens nothing at all — it only needs to know which
 //! encoded directories exist and how many `*.jsonl` files sit under them.
 //!
@@ -56,7 +76,7 @@
 //!
 //! ponytail: the machine sweep reads every session file the connector can see,
 //! so on a large corpus doctor costs a full scan. That is the price of a real
-//! `parse_failures` tally — mtime cannot tell you a file is damaged. If it ever
+//! damage tally — mtime cannot tell you a file is damaged. If it ever
 //! hurts, give doctor the same `--since/--until` the other commands have rather
 //! than faking the number.
 
@@ -100,8 +120,11 @@ pub struct ConnectorReport {
     pub roots: Vec<RootReport>,
     /// Sessions visible under `roots` with an unbounded window.
     pub sessions: usize,
-    /// Lines those sessions could not parse. Damage, not deliberate skips.
+    /// Lines those sessions could not parse. Damage.
     pub parse_failures: usize,
+    /// Lines the connector refused to read on purpose. Not damage — over a
+    /// size cap, or a shape that connector does not take. See the module doc.
+    pub declined: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -227,11 +250,33 @@ fn connector_report(c: &dyn Connector, findings: &mut Vec<String>) -> ConnectorR
         .collect();
     let sessions = c.discover(&present, &TimeWindow::default());
     let parse_failures: usize = sessions.iter().map(|s| s.parse_failures).sum();
-    if parse_failures > 0 {
-        let damaged = sessions.iter().filter(|s| s.parse_failures > 0).count();
+    let declined: usize = sessions.iter().map(|s| s.declined).sum();
+
+    // Two findings, never one, and each says what it means. The old single
+    // line reported the union as damage and was false on this very machine —
+    // see the module doc. When nothing is damaged, the decline finding says so
+    // out loud, because "0 damaged" is the sentence a reader needs and an
+    // absent finding does not say it.
+    if declined > 0 {
+        let files = sessions.iter().filter(|s| s.declined > 0).count();
         findings.push(format!(
-            "connector {}: {parse_failures} unparseable lines across {damaged} of {} sessions — those transcripts are damaged, not merely skipped",
+            "connector {}: {} declined across {files} of {} sessions — recount chose not to read them (over its line-size cap, or a shape this connector does not take){}",
             c.name(),
+            lines(declined),
+            sessions.len(),
+            if parse_failures == 0 {
+                "; 0 damaged, so nothing under this root is corrupt"
+            } else {
+                ""
+            }
+        ));
+    }
+    if parse_failures > 0 {
+        let files = sessions.iter().filter(|s| s.parse_failures > 0).count();
+        findings.push(format!(
+            "connector {}: {} damaged across {files} of {} sessions — those lines did not parse, and this is the tally that means something is wrong with the file",
+            c.name(),
+            lines(parse_failures),
             sessions.len()
         ));
     }
@@ -241,7 +286,13 @@ fn connector_report(c: &dyn Connector, findings: &mut Vec<String>) -> ConnectorR
         roots,
         sessions: sessions.len(),
         parse_failures,
+        declined,
     }
+}
+
+/// `1 line` / `2 lines`. Both tallies routinely read `1`.
+fn lines(n: usize) -> String {
+    format!("{n} line{}", if n == 1 { "" } else { "s" })
 }
 
 fn join_readiness(repo: &Path, findings: &mut Vec<String>) -> JoinReadiness {
@@ -363,8 +414,8 @@ fn digest(r: &Report) -> String {
     for c in &r.connectors {
         let _ = writeln!(
             s,
-            "  {:<14} {} sessions, {} parse failures",
-            c.name, c.sessions, c.parse_failures
+            "  {:<14} {} sessions, {} lines declined, {} damaged",
+            c.name, c.sessions, c.declined, c.parse_failures
         );
         if c.roots.is_empty() {
             // generic_jsonl, by design: any directory you point it at.
@@ -485,6 +536,92 @@ mod tests {
 
     fn found(r: &Report, needle: &str) -> bool {
         r.findings.iter().any(|f| f.contains(needle))
+    }
+
+    /// Sessions with the two tallies set by hand — the connector section is
+    /// the only part of doctor that has no real input in a tempdir.
+    struct Tallies(Vec<(usize, usize)>);
+
+    impl Connector for Tallies {
+        fn name(&self) -> &'static str {
+            "claude_code"
+        }
+        fn roots(&self) -> Vec<PathBuf> {
+            Vec::new()
+        }
+        fn discover(
+            &self,
+            _dirs: &[PathBuf],
+            _window: &TimeWindow,
+        ) -> Vec<crate::model::SessionMeta> {
+            self.0
+                .iter()
+                .enumerate()
+                .map(
+                    |(i, &(declined, parse_failures))| crate::model::SessionMeta {
+                        path: PathBuf::from(format!("s{i}.jsonl")),
+                        cwd: None,
+                        first_ts: None,
+                        last_ts: None,
+                        turn_count: 0,
+                        parse_failures,
+                        declined,
+                        connector: "claude_code".to_string(),
+                    },
+                )
+                .collect()
+        }
+        fn read(&self, _path: &Path) -> Vec<crate::model::Turn> {
+            Vec::new()
+        }
+    }
+
+    /// **The bead.** doctor shipped saying "12 unparseable lines across 6 of
+    /// 828 sessions — those transcripts are damaged, not merely skipped" about
+    /// a corpus with zero JSON errors in it (`docs/format-notes.md` §5.1). The
+    /// twelve were lines recount declined at its own 8 MB cap. This is that
+    /// corpus at 1/100 scale: the finding must name declines as declines, and
+    /// must say "0 damaged" out loud rather than leave it to be inferred.
+    #[test]
+    fn declined_lines_are_never_reported_as_damage() {
+        let corpus: Vec<(usize, usize)> = std::iter::repeat_n((2, 0), 6)
+            .chain(std::iter::repeat_n((0, 0), 2))
+            .collect();
+        let mut findings = Vec::new();
+        let rep = connector_report(&Tallies(corpus), &mut findings);
+
+        assert_eq!((rep.declined, rep.parse_failures), (12, 0));
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+        let f = &findings[0];
+        assert!(
+            f.contains("12 lines declined across 6 of 8 sessions"),
+            "{f}"
+        );
+        assert!(f.contains("0 damaged"), "{f}");
+        assert!(
+            !f.contains("unparseable"),
+            "the word that started this: {f}"
+        );
+
+        // Real damage is a finding of its own and does not borrow the other's
+        // number — nor its reassurance.
+        let mut findings = Vec::new();
+        let rep = connector_report(&Tallies(vec![(2, 0), (0, 1)]), &mut findings);
+        assert_eq!((rep.declined, rep.parse_failures), (2, 1));
+        assert_eq!(findings.len(), 2, "{findings:#?}");
+        assert!(findings[0].contains("2 lines declined across 1 of 2 sessions"));
+        assert!(!findings[0].contains("0 damaged"), "{}", findings[0]);
+        assert!(findings[1].contains("1 line damaged across 1 of 2 sessions"));
+
+        assert!(digest(&Report {
+            command: "doctor",
+            schema: SCHEMA,
+            repo: PathBuf::from("/r"),
+            connectors: vec![rep],
+            join_readiness: check(Path::new("/nowhere")).join_readiness,
+            findings,
+        })
+        .contains("2 lines declined, 1 damaged"));
     }
 
     /// The headline: nothing exists, everything is reported, nothing panics.
