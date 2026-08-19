@@ -42,9 +42,21 @@
 //! * **No block-type parser.** Rendering `tool_use`/`tool_result`/`thinking`
 //!   blocks is `claude_code`'s job, against schema notes it owns. Duplicating
 //!   it here is exactly the coupling "best-effort" exists to avoid.
-//! * **No recursion, no sniffing, no repair.** Files directly under the given
-//!   dirs only; no guessing which tool wrote them; no fixing up a record that
-//!   does not already have what the spec names.
+//! * **No sniffing, no repair.** No guessing which tool wrote a file; no
+//!   fixing up a record that does not already have what the spec names.
+//!
+//! # It does walk subdirectories (this doc used to say otherwise)
+//!
+//! Discovery is [`crate::connector::candidates`], shared with `claude_code`,
+//! and it recurses. That is deliberate: `docs/format-notes.md` §0.1 measured
+//! 604 of 871 real transcripts one level down, at
+//! `<session-uuid>/subagents/agent-<hex>.jsonl`, and a one-level listing would
+//! silently miss three quarters of a corpus — the exact shape of failure this
+//! tool exists to prevent. Over the flat directory of `*.jsonl` that the spec
+//! line describes, the recursion is a no-op and this connector behaves exactly
+//! as before; pointed at a tree, it finds every `*.jsonl` in it. Missing
+//! nothing is the right default for a best-effort reader, so the walk stands
+//! and the promise it broke is what changed.
 //! * **No timeless turns.** A line whose timestamp is missing or unparseable
 //!   is a parse failure, counted and skipped — not a turn with a guessed time.
 //!   The join is a time-window overlap, so a turn with no time cannot take
@@ -182,10 +194,26 @@ fn flatten(value: &Value) -> String {
 mod tests {
     use super::*;
 
-    // `discover` is not exercised here: it routes through `connector::candidates`
-    // and `prune::partition`, both still `todo!()` in this worktree (other
-    // beads). These tests drive `read`/`scan` against paths they build
-    // themselves, which is the parsing this bead owns.
+    // `discover` is exercised at the bottom of this module. It was not, when
+    // this connector landed: it routes through `connector::candidates` and
+    // `prune::partition`, both `todo!()` in that worktree at the time. Both
+    // are real now (recount-hwk.24, .32), so recount-hwk.33 — the first
+    // caller — proves the path.
+
+    /// Write `body` at `path`, creating parents, with an explicit mtime — a
+    /// test that raced the wall clock would be testing the machine, not the
+    /// rule.
+    fn write_at(path: &Path, body: &str, mtime: &str) -> PathBuf {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
+        let f = fs::File::options().write(true).open(path).unwrap();
+        f.set_times(
+            fs::FileTimes::new()
+                .set_modified(std::time::SystemTime::from(parse_ts(mtime).unwrap())),
+        )
+        .unwrap();
+        path.to_path_buf()
+    }
 
     fn file(body: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
@@ -341,5 +369,73 @@ mod tests {
     fn has_no_roots_because_any_dir_has_no_root() {
         assert!(GenericJsonl.roots().is_empty());
         assert_eq!(GenericJsonl.name(), "generic_jsonl");
+    }
+
+    /// The one path wave 1 could not test: `discover` end to end, over the
+    /// real `candidates` walk and the real `prune::partition`.
+    ///
+    /// Three files, three different fates, one call:
+    ///
+    /// * `old.jsonl` — mtime before `since`. **Pruned unopened** by
+    ///   `prune::partition`; it is mode 000, so an implementation that opened
+    ///   it would read nothing and could not report its turn.
+    /// * `nest/deep/new.jsonl` — one level down, and then another. Found only
+    ///   because `candidates` recurses (see the module doc), and kept.
+    /// * `touched.jsonl` — mtime inside the window, turns entirely before it.
+    ///   mtime cannot rule it out (the prune is one-sided, by design), so it
+    ///   is opened; `discover`'s own span check then drops it.
+    #[test]
+    fn discover_recurses_prunes_on_mtime_and_then_on_the_real_span() {
+        let dir = tempfile::tempdir().unwrap();
+        let turn = |ts: &str| format!(r#"{{"ts":"{ts}","role":"user","content":"hi"}}"#);
+
+        let old = write_at(
+            &dir.path().join("old.jsonl"),
+            &turn("2026-08-10T00:00:00Z"),
+            "2026-08-01T00:00:00Z",
+        );
+        let nested = write_at(
+            &dir.path().join("nest/deep/new.jsonl"),
+            &turn("2026-08-10T00:00:00Z"),
+            "2026-08-10T00:00:00Z",
+        );
+        let touched = write_at(
+            &dir.path().join("touched.jsonl"),
+            &turn("2026-07-01T00:00:00Z"),
+            "2026-08-12T00:00:00Z",
+        );
+        // Only reachable by opening it — and it must never be opened.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&old, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+
+        let dirs = vec![dir.path().to_path_buf()];
+        let window = TimeWindow {
+            since: parse_ts("2026-08-05T00:00:00Z").ok(),
+            until: None,
+        };
+        let found = GenericJsonl.discover(&dirs, &window);
+        assert_eq!(
+            found.iter().map(|m| &m.path).collect::<Vec<_>>(),
+            vec![&nested],
+            "old.jsonl prunes on mtime, touched.jsonl on its real span"
+        );
+        assert_eq!(found[0].turn_count, 1);
+        assert_eq!(found[0].connector, "generic_jsonl");
+
+        // Unbounded: nothing prunes, everything the walk found comes back —
+        // including the nested one and the unreadable one (no turns, no
+        // failures, per the tolerance contract).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&old, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let all = GenericJsonl.discover(&dirs, &TimeWindow::default());
+        let mut paths: Vec<_> = all.iter().map(|m| m.path.clone()).collect();
+        paths.sort();
+        assert_eq!(paths, vec![nested, old, touched]);
     }
 }
