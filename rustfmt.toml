@@ -1,0 +1,7 @@
+# Deliberately empty: rustfmt's stable defaults are the house style.
+#
+# Nothing non-default is wanted here. This file exists to say that out loud,
+# and to keep the next person from adding nightly-only keys (group_imports,
+# imports_granularity, wrap_comments, format_code_in_doc_comments, ...) —
+# stable rustfmt ignores those silently, so CI would pass while the setting
+# does nothing, which is worse than having no file at all.
