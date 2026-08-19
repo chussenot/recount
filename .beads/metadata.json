@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "recount",
+  "project_id": "63514c31-392e-4274-accd-df8d7a09866c"
+}
