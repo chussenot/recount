@@ -103,6 +103,7 @@ use crate::cmd::{EXIT_NO_MATCH, EXIT_OK};
 use crate::connector::{self, Connector};
 use crate::join::{self, Match, Query, CONFIDENT};
 use crate::model::{Evidence, SessionMeta, Signal, Tier, TimeWindow, Turn};
+use crate::pact_events::Event;
 use crate::worktree::{self, Worktree};
 
 /// Bumped only when a field leaves or changes meaning, like every other
@@ -121,21 +122,26 @@ pub fn run(args: &AtArgs, json: bool) -> Result<u8> {
     run_with(args, None, None, json)
 }
 
-/// `at`, plus the two [`Query`] fields the CLI has no flag for.
+/// `at`, plus everything a pact event carries that the CLI has no flag for.
 ///
-/// `explain` calls this rather than [`run`]: a pact event carries an
-/// `invoked_from` and often a bead id in its `detail`, and those are the first
-/// and third links of the join. Passing `None, None` — which is what [`run`]
-/// does — is not a lesser join, it is the one `at`'s flags can express: the
-/// chain then falls back to "is there a worktree named after the agent", and
-/// says so in its evidence.
+/// `explain` calls this rather than [`run`]: only the command holding the event
+/// can supply `invoked_from`, the bead id inside `detail`, the two harness ids
+/// that gate the keyed tier, and the attribution chain the header prints.
+/// Passing `None, None` — which is what [`run`]  does — is not a lesser join,
+/// it is the one `at`'s flags can express: the chain then falls back to "is
+/// there a worktree named after the agent", says so in its evidence, and prints
+/// no header, because a header with five dashes in it is not testimony.
+///
+/// The event is taken whole rather than as five arguments because it is one
+/// thing: pact stamps the chain as a unit, and a caller that can pass four of
+/// its links can pass the fifth.
 pub fn run_with(
     args: &AtArgs,
-    invoked_from: Option<&str>,
+    event: Option<&Event>,
     bead: Option<&str>,
     json: bool,
 ) -> Result<u8> {
-    let report = resolve(args, invoked_from, bead)?;
+    let report = resolve(args, event, bead)?;
     emit(
         &report,
         json,
@@ -149,7 +155,7 @@ pub fn run_with(
 /// whole pipeline — git, the path encoding, the connectors, the join — is worth
 /// asserting against a real tree, and a test cannot read a report it has
 /// already printed to the process's own stdout.
-fn resolve(args: &AtArgs, invoked_from: Option<&str>, bead: Option<&str>) -> Result<Report> {
+fn resolve(args: &AtArgs, event: Option<&Event>, bead: Option<&str>) -> Result<Report> {
     // Resolution before any file opens, the spec's cheapness clause: --repo
     // becomes encoded session directories, and the absent ones are dropped for
     // one stat each. A repo no agent ever ran in reaches no connector at all.
@@ -166,20 +172,17 @@ fn resolve(args: &AtArgs, invoked_from: Option<&str>, bead: Option<&str>) -> Res
         agent: &args.agent,
         at: args.ts,
         window: args.window,
-        invoked_from,
+        invoked_from: event.and_then(|e| e.invoked_from.as_deref()),
         bead,
-        // recount-1cw.6 plumbs these through from the event; until then `at`
-        // has no flag that can name a transcript, so every answer is inferred.
-        harness_session: None,
-        harness_subagent: None,
+        // The two ids that gate the keyed tier. They come from the event and
+        // from nowhere else: `at`'s flags cannot name a transcript, so a plain
+        // `recount at` still resolves topologically, as it always did.
+        harness_session: event.and_then(|e| e.harness_session.as_deref()),
+        harness_subagent: event.and_then(|e| e.harness_subagent.as_deref()),
     };
-    Ok(decide(
-        &query,
-        &repo,
-        &worktrees,
-        &dirs,
-        &connector::registry(),
-    ))
+    let mut report = decide(&query, &repo, &worktrees, &dirs, &connector::registry());
+    attribute(&mut report, event);
+    Ok(report)
 }
 
 /// The join, scanned cheaply first and honestly second.
@@ -299,6 +302,154 @@ struct RefusalOut {
     detail: String,
 }
 
+/// The attribution pact 0.11.0 stamped on the event itself: who ran the agent,
+/// under what model, in which transcript, on which branch.
+///
+/// Verbatim, and every field optional, because a row written before 0.11.0 —
+/// or by an orchestrator, which has a session and is nobody's subagent —
+/// legitimately carries fewer than five. An absent link is printed as an absent
+/// link, never inferred: the point of a chain is that a reader can see where it
+/// stops.
+///
+/// # `declared_model` is named for what it is
+///
+/// It is `PACT_MODEL` — what the spawner ASKED FOR. It is not evidence that any
+/// model answered, and the two genuinely come apart: a fleet that declares
+/// `claude-opus-5` and gets served something else has an orchestration bug, and
+/// a header that printed this as "model" would hide it behind a word that reads
+/// like an observation. The digest carries the same marker in words.
+#[derive(Debug, Clone, Serialize)]
+struct Chain {
+    harness: Option<String>,
+    declared_model: Option<String>,
+    harness_session: Option<String>,
+    harness_subagent: Option<String>,
+    branch: Option<String>,
+}
+
+impl Chain {
+    fn of(e: &Event) -> Self {
+        Chain {
+            harness: e.harness.clone(),
+            declared_model: e.model.clone(),
+            harness_session: e.harness_session.clone(),
+            harness_subagent: e.harness_subagent.clone(),
+            branch: e.branch.clone(),
+        }
+    }
+}
+
+/// What the declared model and the answering transcript said, side by side.
+///
+/// Present only when BOTH sides exist. Every absence is silence: the spec's
+/// rule is never to error on a comparison that cannot be made, and a comparison
+/// with one side missing is not a weak comparison, it is not one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ModelCheck {
+    /// `PACT_MODEL`, from the event.
+    declared: String,
+    /// Every distinct `message.model` the transcript recorded, most frequent
+    /// first. A list, not a value — see [`Verdict::Switched`].
+    recorded: Vec<String>,
+    verdict: Verdict,
+}
+
+/// The three things this comparison can honestly say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Verdict {
+    /// Every value the transcript recorded is the declared model.
+    Agrees,
+    /// The declared model is among them, and it is not the only one: the run
+    /// changed model part-way through. Not drift — the declaration held, for
+    /// part of the run — and the most interesting thing here, so it is its own
+    /// verdict rather than a footnote on either of the others.
+    Switched,
+    /// The declared model is not among them at all. Orchestration drift.
+    Differs,
+}
+
+/// A model slug with a trailing `-YYYYMMDD` release date removed.
+///
+/// `claude-haiku-4-5-20251001` and `claude-haiku-4-5` are the same model, and
+/// they meet: the transcript records whatever the API returned, and `PACT_MODEL`
+/// is whatever a human typed. An exact string compare reports that pair as a
+/// discrepancy, which is a false accusation about an agent that did exactly what
+/// it was told.
+fn undated(slug: &str) -> &str {
+    match slug.rsplit_once('-') {
+        Some((head, date)) if date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()) => head,
+        _ => slug,
+    }
+}
+
+/// Declared against recorded, or `None` for "say nothing".
+///
+/// Two sources are deliberately NOT consulted here. The sidecar's own `model`
+/// key is a spawn-time alias (`sonnet`, `opus`) and is not a slug, so comparing
+/// it would manufacture a discrepancy out of a naming convention. And
+/// `<synthetic>` — the stub Claude Code writes on its own API-error records, 72
+/// of 80 of them rate-limit and auth failures — is already excluded upstream in
+/// [`crate::connector::claude_code::Identity::models`] and must stay excluded:
+/// those lines are still turns, because "the agent got a 429" is exactly what an
+/// audit wants to read, but they are not a model that answered.
+fn model_check(declared: Option<&str>, recorded: &[String]) -> Option<ModelCheck> {
+    let declared = declared?;
+    if recorded.is_empty() {
+        return None;
+    }
+    let hit = |m: &&String| undated(m) == undated(declared);
+    let verdict = if recorded.iter().all(|m| hit(&m)) {
+        Verdict::Agrees
+    } else if recorded.iter().any(|m| hit(&m)) {
+        Verdict::Switched
+    } else {
+        Verdict::Differs
+    };
+    Some(ModelCheck {
+        declared: declared.to_string(),
+        recorded: recorded.to_vec(),
+        verdict,
+    })
+}
+
+/// Every model the winning transcript actually recorded, most frequent first.
+///
+/// Only `claude_code` knows: `generic_jsonl` reads no model field by design, so
+/// there is nothing to ask it and an empty list from it is silence rather than
+/// disagreement. This re-reads the one file that won, like [`best`] does for the
+/// transcript, and for the same reason — the alternative is a `SessionMeta` that
+/// carries the set, which is a change across three other beads' files.
+fn recorded_models(meta: &SessionMeta) -> Vec<String> {
+    if meta.connector == connector::claude_code::ClaudeCode.name() {
+        connector::claude_code::scan(&meta.path).identity.models
+    } else {
+        Vec::new()
+    }
+}
+
+/// Hang the event's chain, and the one comparison it makes possible, on a
+/// report the join has already finished.
+///
+/// After the join rather than inside it, because none of this is an input to
+/// the join: the chain is what the ledger says about the question, and the
+/// comparison is between that and the answer.
+///
+/// **The comparison waits for a confident match.** Below the bar there is a
+/// candidate but not a verdict, and attributing that session's recorded model to
+/// this agent would be the same mistake as printing its transcript: a fact about
+/// *a* session, printed under a heading that reads as a fact about *the* agent.
+/// A false "orchestration drift" is worse than no line at all.
+fn attribute(r: &mut Report, event: Option<&Event>) {
+    let Some(e) = event else { return };
+    r.chain = Some(Chain::of(e));
+    if let Some(b) = &r.best {
+        if b.confident {
+            r.model_check = model_check(e.model.as_deref(), &recorded_models(&b.session));
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct Report {
     command: &'static str,
@@ -311,6 +462,12 @@ struct Report {
     /// Sessions the window could not rule out — the field the join chose from.
     considered: usize,
     threshold: f64,
+    /// What pact stamped on the event. `null` for a plain `recount at`, which
+    /// has no event: a chain of five nulls would read like a broken ledger.
+    chain: Option<Chain>,
+    /// `null` whenever either side is missing, or the match is not confident.
+    /// See [`attribute`].
+    model_check: Option<ModelCheck>,
     outcome: Outcome,
     best: Option<Best>,
     refusal: Option<RefusalOut>,
@@ -373,6 +530,10 @@ fn answer(
         session_dirs: dirs.to_vec(),
         considered: sessions.len(),
         threshold: CONFIDENT,
+        // Filled by `attribute`, which runs after the join: neither is an input
+        // to it.
+        chain: None,
+        model_check: None,
         outcome,
         best,
         refusal,
@@ -459,6 +620,7 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
         r.session_dirs.len(),
         r.considered
     )?;
+    chain(r, w)?;
 
     if let Some(b) = &r.best {
         writeln!(
@@ -471,20 +633,33 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
             },
             b.session.path.display()
         )?;
-        writeln!(
-            w,
-            "    confidence {} · threshold {:.2} · {}",
-            b.tier,
-            r.threshold,
-            if b.confident {
-                "CONFIDENT"
-            } else {
-                "NOT CONFIDENT"
-            }
-        )?;
+        let verdict = if b.confident {
+            "CONFIDENT"
+        } else {
+            "NOT CONFIDENT"
+        };
+        // Which tier answered, in the word it serialises as. A keyed answer has
+        // no number and no threshold to clear, and printing "confidence keyed ·
+        // threshold 0.50" would invite a reader to look for the score that is
+        // missing. Nothing is missing: there was nothing to be uncertain about.
+        match b.tier.confidence() {
+            Some(c) => writeln!(
+                w,
+                "    tier {} · confidence {c} · threshold {:.2} · {verdict}",
+                b.tier.name(),
+                r.threshold
+            )?,
+            None => writeln!(
+                w,
+                "    tier {} · no score, and none is missing: the event named this \
+                 transcript · {verdict}",
+                b.tier.name()
+            )?,
+        }
         for e in &b.evidence {
             writeln!(w, "      · {}: {}", signal_words(e.signal), e.detail)?;
         }
+        model_line(r, w)?;
     }
 
     match r.outcome {
@@ -507,12 +682,80 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
                  Look at\n  the {}.",
                 match refusal.reason {
                     "no overlap" => "clock",
+                    // Reachable only for an event that named a transcript, which
+                    // is why it arrived with this bead: the ids are usable or
+                    // they are not, and either way the disk is the next place to
+                    // look, not the fleet's shape.
+                    "no keyed transcript" =>
+                        "transcript store — or at which machine you are standing on",
                     _ => "topology",
                 }
             )?;
         }
     }
     Ok(())
+}
+
+/// The five links pact stamped on the event, in the order the chain runs:
+/// harness, model, session, subagent, branch.
+///
+/// Nothing at all without an event — see [`Report::chain`]. With one, all five
+/// are printed including the absent ones, as `—`: which link pact could not
+/// stamp is a fact about the ledger that an auditor is entitled to see, and
+/// omitting the empty rows would leave them guessing whether the field was
+/// missing or the renderer was.
+fn chain(r: &Report, w: &mut dyn Write) -> io::Result<()> {
+    let Some(c) = &r.chain else { return Ok(()) };
+    let or_dash = |v: &Option<String>| v.clone().unwrap_or_else(|| "—".to_string());
+    writeln!(w, "\n  chain    what pact stamped on the event itself")?;
+    writeln!(w, "    harness           {}", or_dash(&c.harness))?;
+    writeln!(
+        w,
+        "    model             {} (declared — the PACT_MODEL the spawner asked for, which \
+         is\n                      an intent, not an observation: it is not evidence that \
+         this\n                      model answered)",
+        or_dash(&c.declared_model)
+    )?;
+    writeln!(w, "    harness_session   {}", or_dash(&c.harness_session))?;
+    writeln!(w, "    harness_subagent  {}", or_dash(&c.harness_subagent))?;
+    writeln!(w, "    branch            {}", or_dash(&c.branch))
+}
+
+/// Declared against recorded, one line, or nothing at all.
+///
+/// The `Switched` wording is the decision this bead had to make. A transcript
+/// with two real models in it is not a discrepancy and not an agreement: the
+/// declaration was honoured for part of the run and something changed the model
+/// under it, which is a fact about the run and the most interesting thing this
+/// comparison can surface. Folding it into either neighbour would either hide a
+/// mid-run switch or accuse an agent that was obeying its declaration.
+fn model_line(r: &Report, w: &mut dyn Write) -> io::Result<()> {
+    let Some(m) = &r.model_check else {
+        return Ok(());
+    };
+    let recorded = m.recorded.join(", then ");
+    match m.verdict {
+        Verdict::Agrees => writeln!(
+            w,
+            "      · model: declared {}, session records {recorded} — they agree",
+            m.declared
+        ),
+        Verdict::Switched => writeln!(
+            w,
+            "      · model: declared {}, session records {recorded} — the run SWITCHED model \
+             mid-transcript.\n        Not drift: the declaration held for part of it. The \
+             values are most-frequent-first,\n        not chronological, so the order above \
+             is not the order it happened in",
+            m.declared
+        ),
+        Verdict::Differs => writeln!(
+            w,
+            "      · model: declared {}, session records {recorded} — ORCHESTRATION DRIFT. \
+             The\n        spawner asked for one model and another answered, for every turn \
+             in this\n        transcript",
+            m.declared
+        ),
+    }
 }
 
 /// The turns inside the window, or the fact that there are none.
@@ -649,6 +892,24 @@ mod tests {
             role: Role::Assistant,
             text: text.to_string(),
             line: 1,
+        }
+    }
+
+    /// A pact 0.11.0 row with the whole chain on it. `None` fields are the
+    /// pre-0.11.0 and orchestrator shapes.
+    fn event(model: Option<&str>, subagent: Option<&str>) -> Event {
+        Event {
+            line: 1,
+            at: ts(NOON),
+            agent: "skeleton".to_string(),
+            path: Some("src/cmd/at.rs".to_string()),
+            invoked_from: Some("skeleton".to_string()),
+            detail: Some("recount-1cw.6: the chain".to_string()),
+            harness: Some("claude-code".to_string()),
+            model: model.map(str::to_string),
+            harness_session: Some("cd7c75eb-c39f-4be4-92ae-29efda5d7d69".to_string()),
+            harness_subagent: subagent.map(str::to_string),
+            branch: Some("wt/atchain".to_string()),
         }
     }
 
@@ -913,6 +1174,10 @@ mod tests {
         assert_eq!(v["best"]["confidence"], 0.95);
         assert!(!v["best"]["evidence"].as_array().unwrap().is_empty());
         assert_eq!(v["best"]["evidence"][0]["signal"], "topology");
+        assert_eq!(v["best"]["tier"], "topological");
+        // Present and null, never absent — the house rule for this document.
+        assert!(v["chain"].is_null(), "no event was passed");
+        assert!(v["model_check"].is_null());
         assert_eq!(v["best"]["transcript"][0]["text"], "skeleton reporting");
         assert!(v["refusal"].is_null());
 
@@ -946,6 +1211,148 @@ mod tests {
         // Multi-byte, so the cut cannot land mid-character.
         let wide = "é".repeat(DIGEST_TURN_CHARS + 5);
         assert!(clip(&wide).contains("[+5 more characters"));
+    }
+
+    /// The header, and the word that keeps it honest.
+    #[test]
+    fn the_chain_header_names_all_five_links_and_marks_the_model_declared() {
+        let s = session(
+            "/s/skeleton.jsonl",
+            Some("/repo/wt/skeleton"),
+            "2026-03-01T11:55:00Z",
+            "2026-03-01T12:05:00Z",
+        );
+        let mut r = run_join(&query("skeleton", NOON, Duration::minutes(5)), &[s], vec![]);
+        attribute(
+            &mut r,
+            Some(&event(Some("claude-opus-5"), Some("a4acccbbc9bfb"))),
+        );
+
+        let text = text_of(&r);
+        assert!(text.contains("harness           claude-code"), "{text}");
+        assert!(
+            text.contains("model             claude-opus-5 (declared"),
+            "{text}"
+        );
+        assert!(
+            text.contains("harness_session   cd7c75eb-c39f-4be4-92ae-29efda5d7d69"),
+            "{text}"
+        );
+        assert!(text.contains("harness_subagent  a4acccbbc9bfb"), "{text}");
+        assert!(text.contains("branch            wt/atchain"), "{text}");
+        // The marker is the whole point: an intent must not read as a fact.
+        assert!(text.contains("not an observation"), "{text}");
+
+        // And it is in the document under a name that says the same thing.
+        let v: Value = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(v["chain"]["declared_model"], "claude-opus-5");
+        assert_eq!(v["chain"]["branch"], "wt/atchain");
+        assert!(
+            v["chain"].get("model").is_none(),
+            "the bare word is not a key"
+        );
+
+        // A pre-0.11.0 row stamps fewer links, and the header says which.
+        let mut bare = run_join(&query("skeleton", NOON, Duration::minutes(5)), &[], vec![]);
+        let mut e = event(None, None);
+        (e.harness, e.branch) = (None, None);
+        attribute(&mut bare, Some(&e));
+        let text = text_of(&bare);
+        assert!(text.contains("harness           —"), "{text}");
+        assert!(text.contains("model             — (declared"), "{text}");
+        assert!(text.contains("harness_subagent  —"), "{text}");
+
+        // No event, no header — five dashes would read like a broken ledger.
+        let mut none = run_join(&query("skeleton", NOON, Duration::minutes(5)), &[], vec![]);
+        attribute(&mut none, None);
+        assert!(!text_of(&none).contains("chain "), "{}", text_of(&none));
+        let v: Value = serde_json::from_str(&serde_json::to_string(&none).unwrap()).unwrap();
+        assert!(v["chain"].is_null());
+        assert!(v["model_check"].is_null());
+    }
+
+    /// The four hazards from wave 1, each of which invents a discrepancy if the
+    /// comparison is a string equality.
+    #[test]
+    fn the_model_comparison_agrees_switches_differs_or_says_nothing() {
+        let v = |ms: &[&str]| ms.iter().map(|m| (*m).to_string()).collect::<Vec<_>>();
+        let check = |d: Option<&str>, ms: &[&str]| model_check(d, &v(ms));
+
+        // Agreement, which this fleet's own 35 transcripts produce.
+        assert_eq!(
+            check(Some("claude-opus-5"), &["claude-opus-5"])
+                .unwrap()
+                .verdict,
+            Verdict::Agrees
+        );
+        // Hazard 2: a dated slug is the same model, not a discrepancy.
+        assert_eq!(
+            check(Some("claude-haiku-4-5"), &["claude-haiku-4-5-20251001"])
+                .unwrap()
+                .verdict,
+            Verdict::Agrees
+        );
+        assert_eq!(undated("claude-haiku-4-5-20251001"), "claude-haiku-4-5");
+        // ... and only a real date. `claude-opus-4-8` keeps its tail.
+        assert_eq!(undated("claude-opus-4-8"), "claude-opus-4-8");
+        assert_eq!(undated("claude-opus-5"), "claude-opus-5");
+
+        // Hazard 1: two real values, declared among them. A mid-run switch,
+        // reported as one, in either order — `models` is most-frequent-first,
+        // so the declared model is not necessarily models[0].
+        for ms in [
+            &["claude-fable-5", "claude-opus-4-8"],
+            &["claude-opus-4-8", "claude-fable-5"],
+        ] {
+            let m = check(Some("claude-fable-5"), ms).unwrap();
+            assert_eq!(m.verdict, Verdict::Switched);
+            assert_eq!(m.recorded.len(), 2, "both sides are named, not just one");
+        }
+
+        // Drift: the declared model is nowhere in the transcript.
+        let m = check(Some("claude-opus-5"), &["claude-fable-5"]).unwrap();
+        assert_eq!(m.verdict, Verdict::Differs);
+        assert_eq!(m.declared, "claude-opus-5");
+
+        // Silence, both ways: nothing declared, and nothing recorded. Never an
+        // error, and never a line.
+        assert!(check(None, &["claude-opus-5"]).is_none());
+        assert!(check(Some("claude-opus-5"), &[]).is_none());
+        // Hazard 3 is upstream — `<synthetic>` never reaches `models` — but if
+        // it ever did it would read as drift, so this pins that it does not
+        // arrive here through some other door.
+        assert_eq!(
+            recorded_models(&session("/nope.jsonl", None, NOON, NOON)),
+            Vec::<String>::new(),
+            "a path that is not on disk records nothing, and that is silence"
+        );
+
+        // The three sentences, in the digest.
+        let s = session(
+            "/s/skeleton.jsonl",
+            Some("/repo/wt/skeleton"),
+            "2026-03-01T11:55:00Z",
+            "2026-03-01T12:05:00Z",
+        );
+        let words = |verdict, ms: &[&str]| {
+            let mut r = run_join(
+                &query("skeleton", NOON, Duration::minutes(5)),
+                std::slice::from_ref(&s),
+                vec![],
+            );
+            r.model_check = Some(ModelCheck {
+                declared: "claude-opus-5".to_string(),
+                recorded: v(ms),
+                verdict,
+            });
+            text_of(&r)
+        };
+        assert!(words(Verdict::Agrees, &["claude-opus-5"]).contains("they agree"));
+        assert!(words(Verdict::Differs, &["claude-fable-5"])
+            .contains("declared claude-opus-5, session records claude-fable-5 — ORCHESTRATION"));
+        let switched = words(Verdict::Switched, &["claude-opus-5", "claude-fable-5"]);
+        assert!(switched.contains("SWITCHED model"), "{switched}");
+        assert!(switched.contains("Not drift"), "{switched}");
     }
 
     fn git(dir: &Path, args: &[&str]) {
@@ -984,7 +1391,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let line = |at: &str, text: &str| {
             format!(
-                r#"{{"type":"assistant","timestamp":"{at}","cwd":"{}","message":{{"role":"assistant","content":[{{"type":"text","text":{text:?}}}]}}}}"#,
+                r#"{{"type":"assistant","timestamp":"{at}","cwd":"{}","message":{{"role":"assistant","model":"claude-opus-5","content":[{{"type":"text","text":{text:?}}}]}}}}"#,
                 repo.display()
             )
         };
@@ -1024,7 +1431,8 @@ mod tests {
             )
         };
 
-        let hit = at(NOON);
+        let mut hit = at(NOON);
+        attribute(&mut hit, Some(&event(Some("claude-opus-5"), None)));
         assert_eq!(hit.outcome, Outcome::Match);
         assert_eq!(hit.exit_code(), EXIT_OK);
         assert_eq!(hit.considered, 1);
@@ -1037,6 +1445,44 @@ mod tests {
         let text = text_of(&hit);
         assert!(text.contains("the join is topological"), "{text}");
         assert!(text.contains("CONFIDENT"), "{text}");
+        // Which tier answered, in the word `Tier::name` serialises as.
+        assert!(
+            text.contains("tier topological · confidence 0.65"),
+            "{text}"
+        );
+        // And the comparison, end to end: a real transcript with a real
+        // `message.model` in it against a real declared one.
+        assert_eq!(
+            recorded_models(&hit.best.as_ref().unwrap().session),
+            vec!["claude-opus-5".to_string()]
+        );
+        assert!(
+            text.contains("declared claude-opus-5, session records claude-opus-5 — they agree"),
+            "{text}"
+        );
+
+        // A keyed answer prints its word and no number, because there is none.
+        let mut keyed = at(NOON);
+        keyed.best.as_mut().unwrap().tier = Tier::Keyed;
+        let text = text_of(&keyed);
+        assert!(
+            text.contains("tier keyed · no score, and none is missing"),
+            "{text}"
+        );
+        assert!(!text.contains("threshold"), "no bar to clear: {text}");
+
+        // Below the bar the comparison is withheld with the transcript: the
+        // recorded model of a session we do not believe is this agent's would
+        // be a false accusation dressed as a finding.
+        let mut weak = at(NOON);
+        weak.best.as_mut().unwrap().confident = false;
+        attribute(&mut weak, Some(&event(Some("claude-fable-5"), None)));
+        assert!(weak.model_check.is_none());
+        assert!(
+            !text_of(&weak).contains("model: declared"),
+            "{}",
+            text_of(&weak)
+        );
 
         // One hour later the same session is still the only one in the repo,
         // and the honest answer is the clock, not the topology — even though

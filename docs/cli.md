@@ -103,9 +103,20 @@ Three outcomes behind two exit codes:
 
 | `outcome` | exit | printed |
 |---|---:|---|
-| `match` | 0 | session, confidence, evidence, transcript window |
-| `low_confidence` | 1 | session, confidence, evidence — no transcript |
-| `refused` | 1 | the reason (`no cwd match` / `no overlap`) and its detail |
+| `match` | 0 | session, tier, evidence, transcript window |
+| `low_confidence` | 1 | session, tier, evidence — no transcript |
+| `refused` | 1 | the reason and its detail |
+
+Every answer names **which tier** produced it. `tier keyed` means the event
+named its own transcript and it was found by one path join and one `stat` —
+there is no confidence beside it and none is missing. `tier topological ·
+confidence 0.65` is the scored ladder, against `threshold`. See
+[join.md](join.md).
+
+The three refusals are not interchangeable: `no cwd match` sends you to the
+topology, `no overlap` to the clock, and `no keyed transcript` to the transcript
+store — an event that named a file which is not on disk was either pruned or
+written on another machine.
 
 `low_confidence` prints the candidate on purpose: both structural gates passed
 and what fell short was the arithmetic, and that evidence is what tells an
@@ -118,8 +129,56 @@ misdiagnosis recount was built to prevent. The path is printed, so
 justifies it.
 
 `refused` prints no candidate, also on purpose: the chain produced nobody to
-score. The two reasons are not interchangeable — `no cwd match` sends you to
-the topology, `no overlap` sends you to the clock.
+score.
+
+#### The chain header
+
+Run through [`recount explain`](#recount-explain), which is the only command
+that has an event, `at` prints what pact 0.11.0 stamped on that event before it
+prints its own answer:
+
+```
+  chain    what pact stamped on the event itself
+    harness           claude-code
+    model             claude-opus-5 (declared — the PACT_MODEL the spawner asked for, …)
+    harness_session   cd7c75eb-c39f-4be4-92ae-29efda5d7d69
+    harness_subagent  aaadf026f08b25971
+    branch            wt/joinkeyed
+```
+
+All five links are printed, absent ones as `—`: which link a ledger could not
+stamp is a fact about the ledger. A plain `recount at` has no event and prints
+no header at all.
+
+**`(declared)` is not decoration.** `model` is `PACT_MODEL` — what the spawner
+*asked for*. It is not evidence that any model answered, and the two come apart.
+
+#### Declared model versus recorded model
+
+When the event declares a model *and* the answering transcript recorded one,
+`at` prints one line comparing them:
+
+| verdict | line | means |
+|---|---|---|
+| `agrees` | `declared X, session records X — they agree` | every value the transcript recorded is the declared model |
+| `switched` | `declared X, session records X, then Y — the run SWITCHED model mid-transcript` | the declaration held for part of the run and something changed the model under it |
+| `differs` | `declared X, session records Y — ORCHESTRATION DRIFT` | the declared model is not in the transcript at all |
+
+`switched` is its own verdict rather than a footnote on either neighbour: a
+transcript honestly holds more than one model (a session can change model
+part-way through), so folding it into `agrees` would hide the switch and folding
+it into `differs` would accuse an agent that was obeying its declaration. The
+recorded values are ordered most-frequent-first, **not chronologically**.
+
+A trailing release date is not a difference: `claude-haiku-4-5-20251001` and a
+declared `claude-haiku-4-5` agree. `<synthetic>` — the stub Claude Code writes
+on its own API-error records — is never a recorded model, so an agent that was
+merely rate-limited is never reported as drift.
+
+The comparison is **silent**, never an error, whenever it cannot be made: no
+declared model, no recorded model, a connector that reads none, or a match below
+the threshold — the recorded model of a session that is not confidently this
+agent's would be an accusation dressed as a finding.
 
 ### `recount grep`
 
@@ -149,11 +208,22 @@ an audit finding to the agent's own words. `--event-line` is 1-based over
 not line 5 parsed. A line past the end is a hard error naming the ledger's
 length, exit 1.
 
-`explain` resolves more than `at` can from the command line, because the event
-also carries the worktree it was invoked from and any bead id in its `detail`
-field — signals `at` has no flags for. Exit codes are inherited from `at`
-unchanged, and so is the JSON envelope: the document says `"command": "at"`,
-with the explain header appearing only in the digest.
+`explain` resolves more than `at` can from the command line, because it is the
+only command that reads an event. The row carries the worktree it was invoked
+from and any bead id in its `detail` — signals `at` has no flags for — and, on a
+pact 0.11.0 ledger, the whole attribution chain: `harness`, `model`,
+`harness_session`, `harness_subagent`, `branch`. The two harness ids are not
+signals to score at all. They *name* the transcript, which is the keyed tier: a
+path join and a `stat`, no cwd, no clock, no number. **The keyed tier is
+reachable only through `explain`**, because no `at` flag can name a transcript.
+
+The chain is also what makes the [declared-versus-recorded model
+comparison](#declared-model-versus-recorded-model) possible, and `at` prints
+both under its own header.
+
+Exit codes are inherited from `at` unchanged, and so is the JSON envelope: the
+document says `"command": "at"`, with the explain header appearing only in the
+digest.
 
 ### `recount doctor`
 
@@ -229,22 +299,44 @@ never absent.
   "session_dirs": ["/home/u/.claude/projects/-abs-path", …],
   "considered": 29,                         // sessions the window could not rule out
   "threshold": 0.5,
+  "chain": {                                // null: no event, i.e. a plain `at`
+      "harness": <str|null>,                // what pact 0.11.0 stamped, verbatim
+      "declared_model": <str|null>,         // PACT_MODEL — an intent, not an observation
+      "harness_session": <str|null>,
+      "harness_subagent": <str|null>,       // null on a top-level agent's row
+      "branch": <str|null> },
+  "model_check": {                          // null whenever the comparison cannot be made
+      "declared": "claude-opus-5",
+      "recorded": ["claude-opus-5"],        // distinct, most-frequent-first, NOT chronological
+      "verdict": "agrees" | "switched" | "differs" },
   "outcome": "match" | "low_confidence" | "refused",
   "best": { "session": { "path": …, "cwd": …, "first_ts": …, "last_ts": …,
                          "turn_count": …, "parse_failures": …, "declined": …,
                          "connector": "claude_code" },
-            "confidence": 0.65, "confident": true,
-            "evidence": [ { "signal": "topology", "detail": "…" },
-                          { "signal": "time_overlap", "detail": "…" },
-                          { "signal": "transcript_mention", "detail": "…" } ],
+            "tier": "keyed" | "topological",
+            "confidence": 0.65,             // null when "tier" is "keyed"
+            "confident": true,
+            "evidence": [ { "signal": "keyed" | "topology" | "time_overlap"
+                                    | "transcript_mention", "detail": "…" }, … ],
             "transcript": [ { "ts": …, "role": …, "text": …, "line": … }, … ] },
-  "refusal": { "reason": "no cwd match" | "no overlap", "detail": "…" } }
+  "refusal": { "reason": "no cwd match" | "no overlap" | "no keyed transcript",
+               "detail": "…" } }
 ```
 
 `best` and `refusal` are exactly one non-null each. `transcript` is `[]` unless
 `outcome` is `"match"`. `threshold` is emitted rather than assumed, so a reader
 never has to know where `CONFIDENT` lives in `src/join.rs` to interpret
 `confidence`.
+
+`tier` and `confidence` are one answer in two fields. A keyed answer writes an
+explicit `null` where the number would be, rather than a number nobody computed:
+`confidence` keeps its meaning, and a reader that finds `null` there knows there
+was nothing to be uncertain about. Apply `threshold` to `confidence` only when
+`tier` is `"topological"` — a keyed answer clears every bar, including 1.0.
+
+`model_check` is null, and the digest silent, whenever either side is missing or
+`confident` is false. Never an error: a comparison that cannot be made is not a
+failed comparison.
 
 ### `grep`
 

@@ -30,9 +30,11 @@
 //!
 //! **Why a keyed answer is a [`Tier`] and not a fifth rung on the ladder.**
 //! The four scores in `join.rs` are calibrated *inference*: they exist because
-//! no signal is certain. pact 0.11.0 changed the question for events that
-//! carry `harness_subagent` — the event NAMES the transcript, resolution is a
-//! path join and a `stat`, and there is nothing probabilistic left. Giving
+//! no signal is certain. pact 0.11.0 changed the question for every event that
+//! names a transcript — `harness_subagent` for a subagent's file,
+//! `harness_session` alone for a top-level agent's own — because then
+//! resolution is a path join and a `stat`, and there is nothing probabilistic
+//! left. Giving
 //! that 0.99 would put an identity on the same axis as a guess and invite a
 //! reader to compare them, which is the confident-inference failure this tool
 //! exists to prevent. So the answer says *how it was reached* first, and only
@@ -307,17 +309,8 @@ impl Tier {
     }
 
     /// The word this tier serialises as, so human output and `--json` cannot
-    /// drift apart.
-    //
-    // The join (recount-1cw.5) uses the type but not this word: the digest
-    // headers that print it are `at`, `explain` and `sessions`, next wave. Same
-    // mechanism as the four attributes that guarded the whole type before it
-    // had a caller — the expectation goes unfulfilled the moment recount-1cw.6
-    // prints the word, and the build says so.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the digest word lands in recount-1cw.6")
-    )]
+    /// drift apart. `at`'s digest prints it (recount-1cw.6), which is what
+    /// retired the `expect(dead_code)` that used to guard it.
     pub fn name(self) -> &'static str {
         match self {
             Tier::Keyed => "keyed",
@@ -395,9 +388,20 @@ impl TryFrom<TierRepr> for Tier {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Signal {
-    /// The event carried `harness_subagent`, and the transcript it names is on
-    /// disk: `.../<session>/subagents/agent-<id>.jsonl`. Not scored — the file
-    /// is there or it is not.
+    /// The event named its own transcript, and the transcript is on disk. Not
+    /// scored — the file is there or it is not.
+    ///
+    /// Two rows can name one, and both are keyed at the same tier because both
+    /// are identities rather than guesses:
+    ///
+    /// * `harness_subagent` present → `.../<session>/subagents/agent-<id>.jsonl`,
+    ///   the subagent's own file.
+    /// * `harness_subagent` absent, `harness_session` present →
+    ///   `.../<session>.jsonl`, the session's own file. Such a row was written
+    ///   by a TOP-LEVEL agent, which owns a session and is nobody's subagent —
+    ///   every orchestrator row looks like this.
+    ///
+    /// Neither field, and there is nothing to key on: the topological ladder.
     Keyed,
     /// `invoked_from -> worktree path -> session cwd`.
     Topology,
