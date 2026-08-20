@@ -1,0 +1,35 @@
+{
+  "check": "silent-contention",
+  "events_scanned": 5,
+  "excluded_by_annotation": 0,
+  "unparseable_lines": 0,
+  "agents": ["ghost", "scribe"],
+  "annotations": [],
+  "top_contended": [{ "path": "src/join.rs", "holds": 2, "distinct_agents": 2 }],
+  "per_agent": [
+    {
+      "agent": "scribe",
+      "events": 4,
+      "holds": 2,
+      "steals": 0,
+      "reclaims": 0,
+      "held_secs_total": 300,
+      "harness": "claude-code",
+      "model": "claude-opus-5",
+      "branch": "wt/scribe"
+    }
+  ],
+  "double_wins": [],
+  "silent_contentions": [
+    {
+      "path": "src/join.rs",
+      "refused_agent": "scribe",
+      "refused_at": "2026-01-15T10:00:00Z",
+      "line": 1,
+      "holder": "ghost",
+      "holder_released_at": "2026-01-15T10:05:00Z",
+      "refused_agent_had_a_channel": false
+    }
+  ],
+  "topology_mismatches": [{ "invoked_from": "main", "events": 83 }]
+}

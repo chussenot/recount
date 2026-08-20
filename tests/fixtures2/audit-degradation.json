@@ -1,0 +1,22 @@
+{
+  "check": "stale-holds",
+  "events_scanned": 3,
+  "excluded_by_annotation": 0,
+  "unparseable_lines": 0,
+  "ttl_secs": 2700,
+  "agents": ["alice", "bob"],
+  "annotations": [],
+  "top_contended": [{ "path": "src/join.rs", "holds": 1, "distinct_agents": 1 }],
+  "per_agent": [{ "agent": "alice", "events": 2, "holds": 1, "steals": 0, "reclaims": 0, "held_secs_total": 300 }],
+  "stale_holds": [
+    {
+      "path": "src/join.rs",
+      "agent": "alice",
+      "opened_at": "2026-01-15T10:00:00Z",
+      "closed_at": "2026-01-15T10:05:00Z",
+      "line": 2,
+      "held_secs": 300
+    }
+  ],
+  "topology_mismatches": [{ "invoked_from": "main", "events": 3 }]
+}

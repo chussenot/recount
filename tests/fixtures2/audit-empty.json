@@ -1,0 +1,15 @@
+{
+  "check": "double-win",
+  "events_scanned": 5,
+  "excluded_by_annotation": 0,
+  "unparseable_lines": 0,
+  "orphaned_closes": 0,
+  "agents": ["ghost", "scribe"],
+  "annotations": null,
+  "top_contended": null,
+  "per_agent": null,
+  "double_wins": [],
+  "stale_holds": [],
+  "silent_contentions": [],
+  "topology_mismatches": []
+}
