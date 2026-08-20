@@ -506,7 +506,7 @@ fn answer(
                 } else {
                     Outcome::LowConfidence
                 },
-                Some(best(m, confident, &window, turns)),
+                Some(best(m, confident)),
                 None,
             )
         }
@@ -540,30 +540,25 @@ fn answer(
     }
 }
 
-/// The winner, with its transcript window — read only when it is going to be
-/// printed. This re-opens the one file the join already read for the mention
-/// tiebreaker; one extra read of one file is cheaper than threading turns back
-/// out of the scorer for the candidates that lost.
-fn best(
-    m: Match,
-    confident: bool,
-    window: &TimeWindow,
-    turns: &dyn Fn(&Path) -> Vec<Turn>,
-) -> Best {
-    let transcript = if confident {
-        turns(&m.session.path)
-            .into_iter()
-            .filter(|t| window.contains(t.ts))
-            .collect()
-    } else {
-        Vec::new()
-    };
+/// The winner, with its transcript window — the join's own
+/// [`Match::in_window`], never re-derived here.
+///
+/// This used to re-open the file and re-apply the window test, and that second
+/// opinion is exactly how `at` came to print "no single turn falls inside it"
+/// underneath a time-overlap signal the scorer had just awarded. There is one
+/// definition of "inside the window" now and it lives in
+/// [`crate::join`]; this function only decides whether the reader is allowed
+/// to SEE it, which is the threshold question and this command's job.
+fn best(m: Match, confident: bool) -> Best {
     Best {
         session: m.session,
         tier: m.tier,
         evidence: m.evidence,
         confident,
-        transcript,
+        // Withheld below the bar on purpose — see the module doc. The join
+        // found these turns either way; what changes is whether the evidence
+        // justifies reading them as testimony.
+        transcript: if confident { m.in_window } else { Vec::new() },
     }
 }
 
@@ -759,13 +754,21 @@ fn model_line(r: &Report, w: &mut dyn Write) -> io::Result<()> {
 }
 
 /// The turns inside the window, or the fact that there are none.
+///
+/// **Only a KEYED answer can reach the empty branch.** A topological match
+/// carries the turns the overlap gate found and that list cannot be empty —
+/// it is the gate ([`Match::in_window`]). So an empty window here is never the
+/// scorer and the renderer disagreeing about overlap; it is an identity the
+/// event NAMED, which never asked the clock anything.
 fn transcript(r: &Report, w: &mut dyn Write) -> io::Result<()> {
     let turns = r.best.as_ref().map_or(&[][..], |b| &b.transcript);
     if turns.is_empty() {
         writeln!(
             w,
-            "\n  transcript window — empty: the session's span overlaps {}, \
-             but no single turn\n  falls inside it. Widen --window.",
+            "\n  transcript window — empty: no turn falls inside {}.\
+             \n  The event NAMED this transcript, so the identity does not rest on the clock\
+             \n  and nothing here is in doubt — there is only nothing to quote. Widen --window\
+             \n  to read what the session was saying around the moment.",
             fmt_window(&r.window)
         )?;
         return Ok(());
@@ -1094,10 +1097,20 @@ mod tests {
         );
 
         for s in [&after, &before] {
+            // A turn where the session says it ran. Overlap is a gate on
+            // turns, so a fixture with a span and no turn in it refuses —
+            // which is what `a_span_that_straddles_the_window_is_not_overlap`
+            // is for, not this test.
+            let spoke = vec![turn(
+                &s.first_ts
+                    .unwrap()
+                    .to_rfc3339_opts(SecondsFormat::Secs, true),
+                "working",
+            )];
             let wide = run_join(
                 &query("skeleton", NOON, Duration::minutes(5)),
                 std::slice::from_ref(s),
-                vec![],
+                spoke.clone(),
             );
             assert_eq!(
                 wide.window.since.unwrap(),
@@ -1119,7 +1132,7 @@ mod tests {
             let narrow = run_join(
                 &query("skeleton", NOON, Duration::minutes(1)),
                 std::slice::from_ref(s),
-                vec![],
+                spoke,
             );
             assert_eq!(narrow.outcome, Outcome::Refused);
             assert_eq!(
@@ -1134,7 +1147,7 @@ mod tests {
         let r = run_join(
             &query("skeleton", NOON, Duration::minutes(5)),
             &[after],
-            vec![],
+            vec![turn("2026-03-01T12:04:00Z", "working")],
         );
         assert!(
             text_of(&r).contains("window ±5m each side"),
@@ -1338,7 +1351,7 @@ mod tests {
             let mut r = run_join(
                 &query("skeleton", NOON, Duration::minutes(5)),
                 std::slice::from_ref(&s),
-                vec![],
+                vec![turn("2026-03-01T12:00:00Z", "working")],
             );
             r.model_check = Some(ModelCheck {
                 declared: "claude-opus-5".to_string(),
@@ -1510,6 +1523,63 @@ mod tests {
         assert!(text_of(&miss).contains("reason: no overlap"));
     }
 
+    /// The bug this bead was filed on, pinned where a human saw it: the digest
+    /// awarded a `time overlap` signal and then, two lines below, said "no
+    /// single turn falls inside it". The two sentences came from two code
+    /// paths and one of them was wrong.
+    ///
+    /// They are one decision now — [`Match::in_window`], computed by the join
+    /// and printed here — so this asserts the pair can never appear together
+    /// again, over every shape of transcript that used to produce it.
+    #[test]
+    fn the_digest_never_claims_overlap_and_an_empty_transcript_window() {
+        let long = session(
+            "/s/long.jsonl",
+            Some("/repo/wt/skeleton"),
+            // Thirteen days: straddles every window there is.
+            "2026-02-20T00:00:00Z",
+            "2026-03-05T00:00:00Z",
+        );
+        let cases: [(&str, Vec<Turn>); 4] = [
+            ("an empty file", vec![]),
+            (
+                "turns either side of the window and none in it",
+                vec![
+                    turn("2026-02-21T09:00:00Z", "days before"),
+                    turn("2026-03-04T09:00:00Z", "days after"),
+                ],
+            ),
+            (
+                "one turn inside",
+                vec![turn("2026-03-01T12:00:30Z", "here")],
+            ),
+            (
+                "one inside, two out",
+                vec![
+                    turn("2026-02-21T09:00:00Z", "before"),
+                    turn("2026-03-01T11:59:00Z", "skeleton is here"),
+                    turn("2026-03-04T09:00:00Z", "after"),
+                ],
+            ),
+        ];
+        for (what, turns) in cases {
+            let r = run_join(
+                &query("skeleton", NOON, Duration::minutes(5)),
+                std::slice::from_ref(&long),
+                turns,
+            );
+            let text = text_of(&r);
+            assert!(
+                !(text.contains("time overlap:") && text.contains("transcript window — empty")),
+                "{what}: the scorer and the renderer disagree again\n{text}"
+            );
+            // And the refusal, when it is one, is the clock's and says so.
+            if r.outcome == Outcome::Refused {
+                assert_eq!(r.refusal.as_ref().unwrap().reason, "no overlap", "{what}");
+            }
+        }
+    }
+
     /// Against this machine's real corpus, if it has one — through the real
     /// `resolve`, `$HOME` and all. Asserts no count and no verdict: the corpus
     /// shrank by 14 files in under three hours while this was written. What is
@@ -1554,6 +1624,12 @@ mod tests {
         let text = text_of(&r);
         assert!(
             text.contains("confidence ") || text.contains("no confident match"),
+            "{text}"
+        );
+        // …and never awards overlap over an empty transcript window, on real
+        // files rather than fixtures.
+        assert!(
+            !(text.contains("time overlap:") && text.contains("transcript window — empty")),
             "{text}"
         );
     }

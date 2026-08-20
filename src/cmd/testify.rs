@@ -244,7 +244,7 @@ fn annotate(
         let t = match join::resolve(&query, worktrees, sessions, turns) {
             Ok(m) if m.tier.clears(CONFIDENT) => {
                 testified += 1;
-                Testimony::matched(&raw, &agent, ts, &window, m, turns)
+                Testimony::matched(&raw, &agent, ts, &window, m)
             }
             Ok(m) => {
                 untestified.push(format!(
@@ -492,18 +492,16 @@ impl Testimony {
         }
     }
 
+    /// The transcript is the join's own [`join::Match::in_window`], not a
+    /// second pass over the file: one definition of "inside the window", in
+    /// `join`, or the scorer and this renderer drift apart again.
     fn matched(
         raw: &Raw,
         agent: &str,
         ts: DateTime<Utc>,
         window: &TimeWindow,
         m: join::Match,
-        turns: &dyn Fn(&Path) -> Vec<Turn>,
     ) -> Self {
-        let transcript = turns(&m.session.path)
-            .into_iter()
-            .filter(|t| window.contains(t.ts))
-            .collect();
         let mut t = Self::shell(raw, agent, ts, Outcome::Match);
         t.testimony = Some(Testified {
             session: m.session,
@@ -511,7 +509,7 @@ impl Testimony {
             confident: true,
             evidence: m.evidence,
             window: *window,
-            transcript,
+            transcript: m.in_window,
         });
         t
     }
@@ -700,11 +698,13 @@ fn one(t: &Testimony, threshold: f64, w: &mut dyn Write) -> io::Result<()> {
     if !d.confident {
         return Ok(());
     }
+    // Reachable only for a KEYED testimony: a topological match's transcript is
+    // the overlap gate's own turn list, and the gate is that it is non-empty.
     if d.transcript.is_empty() {
         writeln!(
             w,
-            "    transcript window — empty: the session overlaps {}, but no single turn \
-             falls inside it. Widen --window.",
+            "    transcript window — empty: no turn falls inside {}. The event NAMED this \
+             transcript, so nothing is in doubt — there is nothing to quote. Widen --window.",
             fmt_window(&d.window)
         )?;
         return Ok(());

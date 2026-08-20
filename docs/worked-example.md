@@ -62,7 +62,7 @@ recount at — /home/chussenot/Documents/recount
   match           /home/chussenot/.claude/projects/-home-chussenot-Documents-recount/cd7c75eb-c39f-4be4-92ae-29efda5d7d69.jsonl
     confidence 0.95 · threshold 0.50 · CONFIDENT
       · topology: session cwd /home/chussenot/Documents/recount is worktree `main` — topology A (process-per-agent): the session cwd names the worktree, so the chain discriminates
-      · time overlap: session covers 2026-08-19T07:00:48Z..2026-08-19T09:16:20Z and overlaps the queried 2026-08-19T06:58:12Z..2026-08-19T07:08:12Z
+      · time overlap: 66 turn(s) of this session fall inside the queried 2026-08-19T06:58:12Z..2026-08-19T07:08:12Z (the session covers 2026-08-19T07:00:48Z..2026-08-19T09:16:20Z)
       · transcript mention: `orchestrator` at line 7 (user): …first) Run on an Opus-class orchestrator with the Task tool. Two-part…
 
   transcript window — 66 turn(s) in [2026-08-19T06:58:12Z … 2026-08-19T07:08:12Z]
@@ -135,7 +135,7 @@ recount at — /home/chussenot/Documents/recount
   match           /home/chussenot/.claude/projects/-home-chussenot-Documents-recount/cd7c75eb-c39f-4be4-92ae-29efda5d7d69/subagents/agent-a0762be1f73c29e45.jsonl
     confidence 0.65 · threshold 0.50 · CONFIDENT
       · topology: session cwd /home/chussenot/Documents/recount is worktree `main` — topology A (process-per-agent) but ambiguous: several candidate sessions name the same worktree, so the chain filtered without discriminating and the transcript mention decides
-      · time overlap: session covers 2026-08-19T08:24:08Z..2026-08-19T08:36:37Z and overlaps the queried 2026-08-19T08:34:18Z..2026-08-19T08:44:18Z
+      · time overlap: 19 turn(s) of this session fall inside the queried 2026-08-19T08:34:18Z..2026-08-19T08:44:18Z (the session covers 2026-08-19T08:24:08Z..2026-08-19T08:36:37Z)
       · transcript mention: `orchestrator` at line 1 (user): …true>"` Do NOT merge — the orchestrator lands your branch at the wave…
 
   transcript window — 19 turn(s) in [2026-08-19T08:34:18Z … 2026-08-19T08:44:18Z]

@@ -170,10 +170,27 @@ defensible in an audit.
 Three signals, in precedence order:
 
 1. **Topology** — the chain above. Without it there is no match to score.
-2. **Time overlap — required, not weighted.** A session whose turns do not
-   overlap the event window is not a weak match; it is not a match at all,
-   because it cannot have produced the event. No overlap short-circuits to a
-   refusal before any score is computed.
+2. **Time overlap — required, not weighted, and measured on turns.** A session
+   with no turn inside the event window is not a weak match; it is not a match
+   at all, because it cannot have produced the event. No overlap
+   short-circuits to a refusal before any score is computed.
+
+   **The primitive is the turn, not the span.** A session whose
+   `first_ts..last_ts` straddles the window has *not* overlapped it: a
+   thirteen-day session straddles every window anyone will ever query, and a
+   session parked overnight straddles the whole night it slept through. The
+   gate is `Match::in_window`, the turns actually inside, and it is non-empty
+   on every topological answer by construction. The span is still consulted,
+   but only as a cheap necessary condition — every turn lies inside the span,
+   so a span that misses the window means the file need not be opened at all.
+
+   That field is also the *only* place "inside the window" is computed. `at`
+   and `testify` print `Match::in_window`; neither re-derives it. This is
+   structural rather than conventional, and deliberately so: the two used to
+   answer the question separately, which is how recount came to award a time
+   overlap signal and then print "no single turn falls inside it" two lines
+   below it, on a session that had been parked through the whole window
+   (`session-learnings.md` §6).
 3. **Transcript mention — the tiebreaker.** The `PACT_AGENT` name or a bead id
    appearing in the transcript separates sessions that already passed 1 and 2.
    It never creates a match on its own: an agent discussing `skeleton` is not
@@ -245,7 +262,7 @@ Read it as three statements:
   mention. It clears the bar but is visibly not 0.70: a mention is testimony,
   not topology.
 - 0.40 is **deliberately below** `CONFIDENT`. Under topology B a repo-level cwd
-  plus a clock overlap is true of every agent in the fleet, and answering from
+  plus a turn in the window is true of every agent in the fleet, and answering from
   it would be a confident conclusion drawn from a feature that cannot
   discriminate — the arkanoid-v1 misdiagnosis this tool exists to prevent. So
   "filtered but did not discriminate, and nothing else spoke" is a refusal, not
@@ -295,7 +312,9 @@ which fails in a way neither of the others describes.
 - **`no overlap`** — the topology succeeded and the clock failed. Sessions
   matched the chain, but none has a turn inside the window. *Go and look at the
   clock.* The detail lists the sessions that matched and the span each covers,
-  so the reader can widen `--window` with a number rather than a guess.
+  so the reader can widen `--window` with a number rather than a guess — and
+  says of each whether its span missed the window entirely or straddled it and
+  was silent through it, because only the first is fixed by widening.
 - **`no keyed transcript`** — the event named a transcript and the name did not
   produce one. Keyed events only; nothing on the ladder can raise it. *Go and
   look at the disk, or at the ledger* — which of those depends on the cause,
@@ -402,7 +421,7 @@ event fields are projected away with `jq`, nothing is edited:
     },
     {
       "signal": "time_overlap",
-      "detail": "session covers 2026-08-19T07:41:47Z..2026-08-19T07:51:56Z and overlaps the queried 2026-08-19T07:33:15Z..2026-08-19T07:43:15Z"
+      "detail": "6 turn(s) of this session fall inside the queried 2026-08-19T07:33:15Z..2026-08-19T07:43:15Z (the session covers 2026-08-19T07:41:47Z..2026-08-19T07:51:56Z)"
     },
     {
       "signal": "transcript_mention",
