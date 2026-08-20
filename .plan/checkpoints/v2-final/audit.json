@@ -1,0 +1,2372 @@
+{
+  "summary": {
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events": 300,
+    "excluded_by_annotation": 0,
+    "annotations": [],
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "by_kind": {
+      "acquired": 146,
+      "refused": 1,
+      "released": 146,
+      "renewed": 7
+    },
+    "agents": [
+      "atchain",
+      "bench",
+      "ci",
+      "claimfix",
+      "claudecode",
+      "claudekeyed",
+      "cmdat",
+      "cmddoctor",
+      "cmdexplain",
+      "cmdgrep",
+      "cmdsessions",
+      "connector",
+      "degradation",
+      "docs2",
+      "explainchain",
+      "explaindedup",
+      "fixtures",
+      "fixtures2",
+      "formatnotes",
+      "generic",
+      "grepperf",
+      "honesty",
+      "honesty2",
+      "integration",
+      "join",
+      "joinkeyed",
+      "learnings",
+      "notespolish",
+      "orchestrator",
+      "overlapfix",
+      "pactevents",
+      "parentkeyed",
+      "phase0-writeup",
+      "probe",
+      "prune",
+      "readme",
+      "sessionschain",
+      "skeleton",
+      "testify",
+      "tier",
+      "worked",
+      "worktree"
+    ],
+    "first_event_at": "2026-08-19T07:12:06.635478038+00:00",
+    "last_event_at": "2026-08-20T08:45:08.382965895+00:00",
+    "steals": 0,
+    "reclaims": 0,
+    "contention": {
+      "refusals": 1,
+      "claims": 146,
+      "contended_pairs": 1,
+      "abandoned_pairs": 0,
+      "abandoned_refusals": 0
+    },
+    "open_holds": 0,
+    "hold_secs": {
+      "completed": 146,
+      "median_secs": 395,
+      "p90_secs": 851,
+      "max_secs": 1869,
+      "ended_by_expiry": 0,
+      "expiry_short_ttl": 0
+    },
+    "top_contended": [
+      {
+        "path": "src/cmd/at.rs",
+        "holds": 8,
+        "distinct_agents": 7
+      },
+      {
+        "path": "src/cmd/explain.rs",
+        "holds": 7,
+        "distinct_agents": 6
+      },
+      {
+        "path": "src/cmd/sessions.rs",
+        "holds": 6,
+        "distinct_agents": 6
+      },
+      {
+        "path": "src/connector/claude_code.rs",
+        "holds": 6,
+        "distinct_agents": 6
+      },
+      {
+        "path": "src/join.rs",
+        "holds": 6,
+        "distinct_agents": 6
+      },
+      {
+        "path": "docs/format-notes.md",
+        "holds": 5,
+        "distinct_agents": 5
+      },
+      {
+        "path": "src/connector/generic_jsonl.rs",
+        "holds": 5,
+        "distinct_agents": 5
+      },
+      {
+        "path": "src/connector/mod.rs",
+        "holds": 5,
+        "distinct_agents": 5
+      },
+      {
+        "path": "src/model.rs",
+        "holds": 5,
+        "distinct_agents": 5
+      },
+      {
+        "path": "src/cmd/doctor.rs",
+        "holds": 4,
+        "distinct_agents": 4
+      }
+    ],
+    "per_agent": [
+      {
+        "agent": "orchestrator",
+        "events": 87,
+        "holds": 40,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 496,
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      {
+        "agent": "skeleton",
+        "events": 32,
+        "holds": 16,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 9040
+      },
+      {
+        "agent": "honesty2",
+        "events": 12,
+        "holds": 6,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 3953,
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      {
+        "agent": "fixtures2",
+        "events": 10,
+        "holds": 5,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 2770,
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      {
+        "agent": "honesty",
+        "events": 10,
+        "holds": 5,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 3145
+      },
+      {
+        "agent": "overlapfix",
+        "events": 10,
+        "holds": 5,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 6166,
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      {
+        "agent": "testify",
+        "events": 10,
+        "holds": 5,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 3215,
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      {
+        "agent": "integration",
+        "events": 8,
+        "holds": 4,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 2108
+      },
+      {
+        "agent": "joinkeyed",
+        "events": 8,
+        "holds": 4,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 2879,
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      {
+        "agent": "atchain",
+        "events": 7,
+        "holds": 3,
+        "steals": 0,
+        "reclaims": 0,
+        "held_secs_total": 1397,
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      }
+    ],
+    "models_by_events": {
+      "claude-opus-5": 126
+    },
+    "model_undeclared": 174,
+    "by_invoked_from": {
+      "atchain": 7,
+      "bench": 2,
+      "ci": 4,
+      "claimfix": 6,
+      "claudecode": 6,
+      "claudekeyed": 4,
+      "cmdat": 4,
+      "cmddoctor": 2,
+      "cmdexplain": 2,
+      "cmdgrep": 2,
+      "cmdsessions": 4,
+      "connector": 2,
+      "degradation": 2,
+      "docs2": 4,
+      "explainchain": 4,
+      "explaindedup": 2,
+      "fixtures": 6,
+      "fixtures2": 10,
+      "formatnotes": 2,
+      "generic": 2,
+      "grepperf": 4,
+      "honesty": 10,
+      "honesty2": 12,
+      "integration": 8,
+      "join": 2,
+      "joinkeyed": 8,
+      "learnings": 4,
+      "main": 91,
+      "notespolish": 2,
+      "overlapfix": 10,
+      "pactevents": 6,
+      "parentkeyed": 2,
+      "probe": 2,
+      "prune": 2,
+      "readme": 4,
+      "sessionschain": 4,
+      "skeleton": 32,
+      "testify": 10,
+      "tier": 6,
+      "worked": 2,
+      "worktree": 2
+    },
+    "by_protocol": {
+      "8546f7af": 300
+    },
+    "protocol_unstamped": 0,
+    "by_pact_version": {
+      "0.10.7": 174,
+      "0.11.0": 126
+    },
+    "watches_active": 0,
+    "diffs_delivered": 0,
+    "deliveries_failed": 0
+  },
+  "double_win": {
+    "check": "double-win",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "stale_holds": {
+    "check": "stale-holds",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": 2700,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "chain_integrity": {
+    "check": "chain-integrity",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 308,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 308,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "commit_correlation": {
+    "check": "commit-correlation",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 146,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:27:26.246575864+00:00",
+        "closed_at": "2026-08-19T07:27:33.786415320+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:27:33.801990647+00:00",
+        "closed_at": "2026-08-19T07:27:34.158936731+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:27:34.177765017+00:00",
+        "closed_at": "2026-08-19T07:27:34.558394522+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:38:15.897013998+00:00",
+        "closed_at": "2026-08-19T07:38:17.272132017+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:38:17.288347620+00:00",
+        "closed_at": "2026-08-19T07:38:18.686580768+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:38:18.702879597+00:00",
+        "closed_at": "2026-08-19T07:38:19.857291999+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:38:19.873880679+00:00",
+        "closed_at": "2026-08-19T07:38:21.069374425+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T07:38:21.086227640+00:00",
+        "closed_at": "2026-08-19T07:38:22.149072356+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:01:35.152762782+00:00",
+        "closed_at": "2026-08-19T08:01:39.638410689+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:01:39.656498593+00:00",
+        "closed_at": "2026-08-19T08:01:44.168508482+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:01:44.185641289+00:00",
+        "closed_at": "2026-08-19T08:01:49.277719234+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:01:49.297043245+00:00",
+        "closed_at": "2026-08-19T08:01:54.474936785+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:21:56.262290993+00:00",
+        "closed_at": "2026-08-19T08:22:01.477894494+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:22:01.496017982+00:00",
+        "closed_at": "2026-08-19T08:22:04.592394199+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:39:12.959622408+00:00",
+        "closed_at": "2026-08-19T08:39:18.030729969+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:39:18.048242748+00:00",
+        "closed_at": "2026-08-19T08:39:23.719282925+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T08:39:23.739021817+00:00",
+        "closed_at": "2026-08-19T08:44:03.346747238+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:04:49.017353071+00:00",
+        "closed_at": "2026-08-19T09:04:53.107509982+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:04:53.129440400+00:00",
+        "closed_at": "2026-08-19T09:04:56.976713653+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:04:56.993293250+00:00",
+        "closed_at": "2026-08-19T09:05:00.570412166+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:14:38.289531384+00:00",
+        "closed_at": "2026-08-19T09:14:48.268670220+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:14:48.340421447+00:00",
+        "closed_at": "2026-08-19T09:14:53.243878808+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:37:35.237282670+00:00",
+        "closed_at": "2026-08-19T09:37:39.958713792+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:37:40.023688903+00:00",
+        "closed_at": "2026-08-19T09:38:47.757037880+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T09:51:13.756345885+00:00",
+        "closed_at": "2026-08-19T09:51:18.399918850+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T16:50:54.327762964+00:00",
+        "closed_at": "2026-08-19T16:50:58.843602420+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T16:50:58.861613180+00:00",
+        "closed_at": "2026-08-19T16:51:04.546657882+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T16:51:04.564606706+00:00",
+        "closed_at": "2026-08-19T16:51:09.535349398+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-19T17:36:09.454984419+00:00",
+        "closed_at": "2026-08-19T17:36:14.738363061+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T06:35:23.647620342+00:00",
+        "closed_at": "2026-08-20T06:35:34.731743557+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T06:35:34.754271692+00:00",
+        "closed_at": "2026-08-20T06:35:39.501175178+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T06:35:39.519616881+00:00",
+        "closed_at": "2026-08-20T06:35:45.023109924+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T06:35:45.040282250+00:00",
+        "closed_at": "2026-08-20T06:35:48.507520044+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T06:36:01.857268867+00:00",
+        "closed_at": "2026-08-20T06:36:05.350844607+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T06:57:23.408171076+00:00",
+        "closed_at": "2026-08-20T06:57:29.988753140+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T06:57:30.007402623+00:00",
+        "closed_at": "2026-08-20T06:57:34.472829739+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T07:18:24.226906629+00:00",
+        "closed_at": "2026-08-20T07:18:28.163624578+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T07:33:31.954803215+00:00",
+        "closed_at": "2026-08-20T07:33:35.588775777+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T08:11:29.329001924+00:00",
+        "closed_at": "2026-08-20T08:11:34.989324757+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-master",
+        "agent": "orchestrator",
+        "opened_at": "2026-08-20T08:45:02.000260634+00:00",
+        "closed_at": "2026-08-20T08:45:08.382965895+00:00"
+      },
+      {
+        "path": ".pact/internal/merge-to-wt/probe",
+        "agent": "probe",
+        "opened_at": "2026-08-19T07:12:06.635478038+00:00",
+        "closed_at": "2026-08-19T07:12:06.646548716+00:00"
+      },
+      {
+        "path": "tests/fixtures",
+        "agent": "fixtures",
+        "opened_at": "2026-08-19T08:45:56.176005701+00:00",
+        "closed_at": "2026-08-19T08:53:22.420022790+00:00"
+      },
+      {
+        "path": "tests/fixtures2",
+        "agent": "fixtures2",
+        "opened_at": "2026-08-20T07:07:46.449524705+00:00",
+        "closed_at": "2026-08-20T07:17:01.022938406+00:00"
+      }
+    ],
+    "concurrent_writes": [],
+    "uncovered_commits": [
+      {
+        "path": "src/join.rs",
+        "hash": "1b642167c3540333bbd2d29795d787b28523c833",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T08:35:37+00:00"
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "hash": "e65a4c38b45ac4fee95cbe1dc194afa15166ad61",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T10:38:56+00:00"
+      },
+      {
+        "path": "README.md",
+        "hash": "4a4324119193602ed445ee9d884e163ee667c982",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T10:54:27+00:00"
+      },
+      {
+        "path": "src/cli.rs",
+        "hash": "4a4324119193602ed445ee9d884e163ee667c982",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T10:54:27+00:00"
+      },
+      {
+        "path": "src/cmd/mod.rs",
+        "hash": "4a4324119193602ed445ee9d884e163ee667c982",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T10:54:27+00:00"
+      },
+      {
+        "path": "src/main.rs",
+        "hash": "4a4324119193602ed445ee9d884e163ee667c982",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T10:54:27+00:00"
+      },
+      {
+        "path": "tests/degradation.rs",
+        "hash": "4a4324119193602ed445ee9d884e163ee667c982",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T10:54:27+00:00"
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "hash": "0481175b4659a3ba06d86e3d0da0640e7a089f8b",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T12:43:49+00:00"
+      },
+      {
+        "path": "README.md",
+        "hash": "0481175b4659a3ba06d86e3d0da0640e7a089f8b",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T12:43:49+00:00"
+      },
+      {
+        "path": "docs/cli.md",
+        "hash": "0481175b4659a3ba06d86e3d0da0640e7a089f8b",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T12:43:49+00:00"
+      },
+      {
+        "path": "docs/connectors.md",
+        "hash": "0481175b4659a3ba06d86e3d0da0640e7a089f8b",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T12:43:49+00:00"
+      },
+      {
+        "path": "docs/join.md",
+        "hash": "0481175b4659a3ba06d86e3d0da0640e7a089f8b",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T12:43:49+00:00"
+      },
+      {
+        "path": "docs/worked-example.md",
+        "hash": "0481175b4659a3ba06d86e3d0da0640e7a089f8b",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T12:43:49+00:00"
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "hash": "9df684994cb14303ad40fc7c4d2b96467596a56c",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T12:52:35+00:00"
+      },
+      {
+        "path": "README.md",
+        "hash": "b3f9d9ea44576d77b34125a3ba98227406f1866e",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T13:05:18+00:00"
+      },
+      {
+        "path": "docs/cli.md",
+        "hash": "b3f9d9ea44576d77b34125a3ba98227406f1866e",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-19T13:05:18+00:00"
+      },
+      {
+        "path": "docs/cli.md",
+        "hash": "4c8ca93dfabc5a021a93ac03a7e7312762e2c886",
+        "author": "Clement HUSSENOT-DESENONGES",
+        "at": "2026-08-20T06:30:19+00:00"
+      }
+    ],
+    "cross_held_commits": [],
+    "commits_attributed": 94,
+    "commits_unattributed": 33,
+    "topology_mismatches": [],
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "merge_divergence": {
+    "check": "merge-divergence",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "merge_divergences": [
+      {
+        "path": "src/join.rs",
+        "released_by": "join",
+        "released_at": "2026-08-19T07:51:30.859098108+00:00",
+        "released_hash": "d4f127cb0e8c50b256c8d6494218729888897553",
+        "acquired_by": "joinkeyed",
+        "acquired_at": "2026-08-19T17:20:53.482236042+00:00",
+        "acquired_hash": "46385917f344658c6064b023e4e19d862c16d0d4",
+        "line": 207
+      },
+      {
+        "path": "src/cmd/explain.rs",
+        "released_by": "explainchain",
+        "released_at": "2026-08-20T06:24:40.133423687+00:00",
+        "released_hash": "a1f1f02e98f2e0a705c1e2a800ba5874fd11163d",
+        "acquired_by": "atchain",
+        "acquired_at": "2026-08-20T06:25:36.924494753+00:00",
+        "acquired_hash": "c76820e13fe2d505c18d7a4576b596f41c4a36fc",
+        "line": 227
+      },
+      {
+        "path": "src/cli.rs",
+        "released_by": "skeleton",
+        "released_at": "2026-08-19T07:23:23.385748198+00:00",
+        "released_hash": "9033144903db3ea6fbe81b36b0517a74de096d3b",
+        "acquired_by": "testify",
+        "acquired_at": "2026-08-20T06:45:35.231393590+00:00",
+        "acquired_hash": "71b42cb01759df24ff184d81f87a9653c80de937",
+        "line": 252
+      },
+      {
+        "path": "src/cmd/mod.rs",
+        "released_by": "skeleton",
+        "released_at": "2026-08-19T07:23:23.407134113+00:00",
+        "released_hash": "30e06b90f07189a6ad35aaa0135f7fe82859c42b",
+        "acquired_by": "testify",
+        "acquired_at": "2026-08-20T06:45:35.235513586+00:00",
+        "acquired_hash": "d1c1831f2c9818b64d8e4053c3741fe2a72cb9ba",
+        "line": 253
+      },
+      {
+        "path": "src/main.rs",
+        "released_by": "skeleton",
+        "released_at": "2026-08-19T07:23:23.427347705+00:00",
+        "released_hash": "5009054d479b8cf5d10eb59fa2e134bca6712bba",
+        "acquired_by": "testify",
+        "acquired_at": "2026-08-20T06:45:35.239323690+00:00",
+        "acquired_hash": "de1c76ad22af822a807641f58e5b16d76e55565f",
+        "line": 254
+      },
+      {
+        "path": "docs/cli.md",
+        "released_by": "sessionschain",
+        "released_at": "2026-08-20T06:28:15.423555021+00:00",
+        "released_hash": "6a36aa56d8232722eebe6c020699bf5376838b01",
+        "acquired_by": "testify",
+        "acquired_at": "2026-08-20T06:45:35.243380407+00:00",
+        "acquired_hash": "6de0e489feeea33235799eea90a4be6cbba128b7",
+        "line": 255
+      },
+      {
+        "path": "docs/worked-example.md",
+        "released_by": "worked",
+        "released_at": "2026-08-19T09:26:01.776527009+00:00",
+        "released_hash": "58971cbc905541d506f1f875a6323f104af51828",
+        "acquired_by": "learnings",
+        "acquired_at": "2026-08-20T07:01:11.368553503+00:00",
+        "acquired_hash": "791b4f756e7dde3fd24478c432032f9e79368a4e",
+        "line": 266
+      },
+      {
+        "path": "tests/degradation.rs",
+        "released_by": "degradation",
+        "released_at": "2026-08-19T09:13:46.990197438+00:00",
+        "released_hash": "a2357b6c2bf07620596fba9df52cc912dac12c7c",
+        "acquired_by": "fixtures2",
+        "acquired_at": "2026-08-20T07:07:46.453437825+00:00",
+        "acquired_hash": "d6d59051a8ad1e317d8fd1db100bba36bb5a2e75",
+        "line": 269
+      },
+      {
+        "path": "src/cmd/at.rs",
+        "released_by": "overlapfix",
+        "released_at": "2026-08-20T08:09:29.878994348+00:00",
+        "released_hash": "f06d901e99f915a0fbb02649e7db7b1265bba1cd",
+        "acquired_by": "honesty2",
+        "acquired_at": "2026-08-20T08:38:07.364175436+00:00",
+        "acquired_hash": "2cc2f4ae704720741d14587346dacbe955ec3e4f",
+        "line": 297
+      },
+      {
+        "path": "src/cmd/testify.rs",
+        "released_by": "overlapfix",
+        "released_at": "2026-08-20T08:09:29.889397579+00:00",
+        "released_hash": "d7051525218b8e0e752d1121587fad5711720f83",
+        "acquired_by": "honesty2",
+        "acquired_at": "2026-08-20T08:38:07.377235530+00:00",
+        "acquired_hash": "84b59286900c41aa9c887bacdb8162dbea9eb232",
+        "line": 298
+      },
+      {
+        "path": "tests/keyed.rs",
+        "released_by": "fixtures2",
+        "released_at": "2026-08-20T07:17:01.026175234+00:00",
+        "released_hash": "bd737588f0265df44be0649bcef07268367cef93",
+        "acquired_by": "honesty2",
+        "acquired_at": "2026-08-20T08:38:07.385514911+00:00",
+        "acquired_hash": "7c92fd43b296893cc52b2cd03e6aa90e03c15467",
+        "line": 299
+      }
+    ],
+    "divergence_unhashed": 43,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "claim_lease_divergence": {
+    "check": "claim-lease-divergence",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": "no assignee history in .beads/interactions.jsonl",
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "retry_storm": {
+    "check": "retry-storm",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "silent_contention": {
+    "check": "silent-contention",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [
+      {
+        "path": "src/cmd/explain.rs",
+        "refused_agent": "atchain",
+        "refused_at": "2026-08-20T06:22:12.046549483+00:00",
+        "line": 223,
+        "holder": "explainchain",
+        "holder_released_at": "2026-08-20T06:23:20.862938853+00:00",
+        "refused_agent_had_a_channel": false
+      }
+    ],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "topology": {
+    "check": "topology",
+    "agents": {
+      "atchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/atchain"
+      },
+      "claudekeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/claudekeyed"
+      },
+      "docs2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/docs2"
+      },
+      "explainchain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explainchain"
+      },
+      "explaindedup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/explaindedup"
+      },
+      "fixtures2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/fixtures2"
+      },
+      "honesty2": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/honesty2"
+      },
+      "joinkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/joinkeyed"
+      },
+      "learnings": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/learnings"
+      },
+      "orchestrator": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "overlapfix": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/overlapfix"
+      },
+      "pactevents": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/pactevents"
+      },
+      "parentkeyed": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/parentkeyed"
+      },
+      "phase0-writeup": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "master"
+      },
+      "sessionschain": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/sessionschain"
+      },
+      "testify": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/testify"
+      },
+      "tier": {
+        "harness": "claude-code",
+        "model": "claude-opus-5",
+        "branch": "wt/tier"
+      }
+    },
+    "context": {
+      "commit-policy": "per-task",
+      "precheck": "v0.2.0-preflight",
+      "run": "recount-v0.2.0",
+      "scheduler": "waves-then-free-run",
+      "topology-expectation": "worktrees"
+    },
+    "events_scanned": 300,
+    "excluded_by_annotation": 0,
+    "unparseable_lines": 0,
+    "orphaned_closes": 0,
+    "double_wins": [],
+    "stale_holds": [],
+    "chain_breaks": [],
+    "chain_tracked": 0,
+    "chain_untracked": 0,
+    "ttl_secs": null,
+    "git_unavailable": null,
+    "correlated_by_head": 0,
+    "correlated_by_time": 0,
+    "holds_with_no_commit": [],
+    "concurrent_writes": [],
+    "uncovered_commits": [],
+    "cross_held_commits": [],
+    "commits_attributed": 0,
+    "commits_unattributed": 0,
+    "topology_mismatches": [],
+    "expected_topology": "any",
+    "merge_divergences": [],
+    "divergence_unhashed": 0,
+    "claim_divergences": [],
+    "claim_unavailable": null,
+    "holds_naming_no_bead": 0,
+    "retry_storms": [],
+    "refusals_without_remaining": 0,
+    "silent_contentions": [],
+    "refusals_with_a_channel": 0,
+    "topology_unstamped": 0,
+    "topology_allowed_from_main": 0
+  },
+  "doctor": {
+    "healthy": false,
+    "checks": [
+      {
+        "name": "git repo",
+        "ok": true,
+        "warn": false,
+        "detail": "/home/chussenot/Documents/recount"
+      },
+      {
+        "name": ".pact/ present",
+        "ok": true,
+        "warn": false,
+        "detail": "present at /home/chussenot/Documents/recount/.pact"
+      },
+      {
+        "name": "worktree",
+        "ok": true,
+        "warn": false,
+        "detail": "main worktree; this repository also has linked worktrees, which share /home/chussenot/Documents/recount/.pact"
+      },
+      {
+        "name": "coordination scope",
+        "ok": true,
+        "warn": false,
+        "detail": "shared (default) — state at /home/chussenot/Documents/recount/.pact"
+      },
+      {
+        "name": "state placement",
+        "ok": true,
+        "warn": false,
+        "detail": "plain — repo root (.git is a directory)"
+      },
+      {
+        "name": "state dir writable",
+        "ok": true,
+        "warn": false,
+        "detail": "/home/chussenot/Documents/recount/.pact is writable"
+      },
+      {
+        "name": "state dir isolation",
+        "ok": true,
+        "warn": false,
+        "detail": "PACT_STATE_DIR is not set — not applicable"
+      },
+      {
+        "name": "worktree schema marker",
+        "ok": true,
+        "warn": false,
+        "detail": "/home/chussenot/Documents/recount/.pact carries the schema marker — a worktree-aware pact has touched it"
+      },
+      {
+        "name": "attribution",
+        "ok": true,
+        "warn": false,
+        "detail": "agent=orchestrator, harness=claude-code, model=claude-opus-5, harness_session=cd7c75eb-c39f-4be4-92ae-29efda5d7d69, harness_subagent=<absent, set PACT_HARNESS_SUBAGENT — no harness exposes this>, branch=master, worktree=recount"
+      },
+      {
+        "name": "event log survives a clone",
+        "ok": true,
+        "warn": false,
+        "detail": ".pact/events.jsonl is tracked — who held what survives a clone"
+      },
+      {
+        "name": "message store survives a clone",
+        "ok": true,
+        "warn": false,
+        "detail": ".pact/messages.jsonl is tracked — what agents said to each other survives a clone"
+      },
+      {
+        "name": "AGENTS.md block current",
+        "ok": false,
+        "warn": false,
+        "detail": "missing or stale — run `pact init`"
+      },
+      {
+        "name": "no duplicated instruction blocks",
+        "ok": true,
+        "warn": true,
+        "detail": "\"Quick Reference\" appears 2 times: line 16, line 55 (near <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->)"
+      },
+      {
+        "name": "CLAUDE.md reaches the protocol",
+        "ok": true,
+        "warn": false,
+        "detail": "imports AGENTS.md"
+      },
+      {
+        "name": "other instruction files current",
+        "ok": true,
+        "warn": false,
+        "detail": "none present"
+      },
+      {
+        "name": "protocol files reach a clone",
+        "ok": true,
+        "warn": false,
+        "detail": "tracked or committable"
+      },
+      {
+        "name": "write-set symlinks",
+        "ok": true,
+        "warn": false,
+        "detail": "no managed file is a symlink escaping the repository"
+      },
+      {
+        "name": "otel export",
+        "ok": true,
+        "warn": false,
+        "detail": "built in, off (no OTEL_EXPORTER_OTLP_ENDPOINT)"
+      },
+      {
+        "name": "one Beads store",
+        "ok": true,
+        "warn": false,
+        "detail": "no conflicting store"
+      },
+      {
+        "name": "Beads CLI",
+        "ok": true,
+        "warn": false,
+        "detail": "bd (bd version 1.2.2 (6c124203e)), attributes writes to the acting agent (--actor)"
+      },
+      {
+        "name": "Beads actor attribution",
+        "ok": true,
+        "warn": false,
+        "detail": "43 pact agent identities, 41 Beads actor(s) recorded — no attribution gap detected"
+      },
+      {
+        "name": "Beads audit sidecar",
+        "ok": true,
+        "warn": false,
+        "detail": ".beads/interactions.jsonl is present — `pact audit --check claim-lease-divergence` has data to read. Whether bd is still recording is not something pact can see (`BD_AUDIT_ENABLED=1` leaves no trace in bd's config), so check the newest row's date if this repo has been quiet"
+      },
+      {
+        "name": "stale leases",
+        "ok": true,
+        "warn": false,
+        "detail": "0 stale (`pact lease ls` collects them)"
+      },
+      {
+        "name": "corrupt leases",
+        "ok": true,
+        "warn": false,
+        "detail": "none"
+      },
+      {
+        "name": "orphaned staging files",
+        "ok": true,
+        "warn": false,
+        "detail": "none"
+      },
+      {
+        "name": "stale wait markers",
+        "ok": true,
+        "warn": false,
+        "detail": "none"
+      }
+    ]
+  },
+  "unacknowledged_messages": [
+    {
+      "id": "pact-msg-42dd8b3d0a239337",
+      "thread": "pact-msg-42dd8b3d0a239337",
+      "from": "connector",
+      "to": "generic",
+      "subject": "candidates() recurses; generic_jsonl's doc says it does not walk subdirectories",
+      "body": "recount-hwk.24 is done (4924322). candidates() now recurses over directory entries, as the wave-0 notes require for the nested <session-uuid>/subagents/agent-<id>.jsonl shape (604 of 871 files).\n\nSeam nit, no signature change: src/connector/generic_jsonl.rs's module doc promises 'does not walk subdirectories'. Anything built on the shared candidates() now does. Over a flat dir of *.jsonl — the layout that connector describes — recursion is a no-op, so nothing breaks; the docs only disagree on a tree generic_jsonl was never pointed at. I noted it in candidates()' doc rather than editing a file I do not own. If you want generic_jsonl to be genuinely non-recursive it needs its own one-level listing, not the shared function — say so and I will add a candidates_flat(), but I think the right fix is one word in that module doc.\n\nNothing else wrong with the seam: the trait, the Vec-not-Result tolerance contract, and the dirs+window argument shape all held up unchanged.",
+      "created_at": "2026-08-19T07:34:27.038764083+00:00",
+      "read": false,
+      "read_by": [
+        "claimfix",
+        "cmdsessions",
+        "honesty",
+        "orchestrator"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-f6e34ec47d01bb8c",
+      "thread": "pact-msg-87adb6361c3ba806",
+      "from": "orchestrator",
+      "to": "formatnotes",
+      "subject": "accepted, and it changed the join bead",
+      "body": "Verified independently before acting on it: all 206 cwd-bearing lines across the three W0 subagent transcripts say the repo root, none says the worktree. The orchestrator's own transcript did record wt/probe, which confirms your mechanism rather than a parse error.\n\nAccepted as a spec deviation, taken openly. The topological chain stays (it is right for process-per-agent fleets, and a cheap correct filter otherwise), but recount-hwk.31's acceptance is amended: the join must detect when the chain fails to DISCRIMINATE, promote transcript-mention from tiebreaker to decisive, lower confidence, and name the observed topology in its evidence. It will be documented in the README, not left as drift. Your bead earned its place in the graph.",
+      "created_at": "2026-08-19T07:40:29.622842667+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-fe1ca3fbb598d066",
+      "thread": "pact-msg-42dd8b3d0a239337",
+      "from": "orchestrator",
+      "to": "connector",
+      "subject": "resolved: doc fix, folded into recount-hwk.33",
+      "body": "Agreed on both counts — recursion is correct for the nested subagents/ layout, and one word in generic_jsonl's module doc is the better fix than a second walk. You were right not to edit a file outside your lease; that is the protocol working.\n\nFolded into recount-hwk.33 (sessions), which now owns src/connector/generic_jsonl.rs in W2. Same bead also has to prove generic_jsonl::discover() end to end — it is the one path W1 could not test, because candidates() and partition() were both todo!() in that agent's worktree at the time.",
+      "created_at": "2026-08-19T07:40:29.627815853+00:00",
+      "read": false,
+      "read_by": [
+        "claimfix",
+        "cmdsessions",
+        "honesty"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-3b5a44b2828c9464",
+      "thread": "pact-msg-e9bfb04b236c11a0",
+      "from": "orchestrator",
+      "to": "worktree",
+      "subject": "keeping the error; doctor will absorb it",
+      "body": "Keeping your version: a non-git --repo is an error. The brief wins over the skeleton's doc comment, and 'this is not a repository' is information, not a failure to degrade.\n\nOne consequence you could not see: the Phase-3 obligation runs every command in a BARE TEMPDIR, which is not a git repo. So doctor must not hard-fail there — it has to report 'not a git repository' as a join-readiness finding and still exit 0. Noted on recount-hwk.37 and it will be noted on the degradation bead too. Your projects_root() duplicate is folded into recount-hwk.29, which is the bead that makes the real one callable.",
+      "created_at": "2026-08-19T07:40:29.633076026+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-229b6cd0ee47491b",
+      "thread": "pact-msg-229b6cd0ee47491b",
+      "from": "claudecode",
+      "to": "join",
+      "subject": "claude_code has landed on wt/claudecode (7a0750e). Two th...",
+      "body": "claude_code has landed on wt/claudecode (7a0750e). Two things it surfaces that\nyou cannot get from SessionMeta, both because SessionMeta has no field for them:\n\n  claude_code::scan(&path) -> Scan { meta: SessionMeta, identity: Identity }\n  claude_code::sidecar(&path) -> Option<Sidecar>   // no transcript read at all\n\n  Identity { agent_id, session_id, cwds: Vec<PathBuf>, sidecar: Option<Sidecar> }\n  Sidecar  { agent_type, description, tool_use_id, spawn_depth }\n\n1. join: `sidecar.description` is the .meta.json label of the spawning task\n   (\"W0 empirical format-notes bead\"). Under the subagent topology (notes\n   §4.3) every fleet agent shares one cwd, so topology cannot discriminate\n   siblings and this is the cheapest signal that can — one small file read,\n   no transcript. `identity.agent_id` is the real per-file identity;\n   `session_id` is NOT unique (all 604 subagent files carry their parent's),\n   so do not key a map on it.\n\n2. sessions: `SessionMeta.cwd` is a SUMMARY, not the evidence. 46 of 871 real\n   files hold more than one cwd and one holds nine (notes §4.2). The rule I\n   chose for the single field is most-frequent-wins, ties by first appearance.\n   `sessions --repo` must match if ANY of `identity.cwds` resolves into the\n   repo or a worktree, per §4.2 — matching only `meta.cwd` will silently drop\n   sessions that did half their work in your worktree.\n\nAlso: a Turn's text tags non-text blocks — \"[thinking]\\n...\", \"[tool_use Bash]\\n{json}\",\n\"[tool_result]\\n...\", \"[image]\", \"[<unknown>]\". A bare string user prompt is\nverbatim and untagged. Useful if you are grepping for a mention: the agent name\noften appears inside a [thinking] or [tool_use Bash] body, not in prose.",
+      "created_at": "2026-08-19T07:54:11.759848786+00:00",
+      "read": false,
+      "read_by": [
+        "cmdsessions"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-02786c06d889a544",
+      "thread": "pact-msg-229b6cd0ee47491b",
+      "from": "cmdsessions",
+      "to": "claudecode",
+      "subject": "Both landed as changes, thank you — the second one is a r...",
+      "body": "Both landed as changes, thank you — the second one is a real defect in what I\njust shipped and it is now written down rather than discovered later.\n\n(2) sessions, the multi-cwd match. You are right and I cannot fix it in W2:\nIdentity.cwds does not exist in my tree, so tie_to_repo() reads the single\nSessionMeta.cwd and a session whose most-frequent cwd is elsewhere lands in\nthe report's `excluded_by_cwd` count instead of the list. It is counted rather\nthan silently dropped, which is the only reason I was willing to ship it —\n\"the number is not zero\" is at least a question an auditor can ask. Filed as\nrecount-hwk.44 (blocked on .33 and .29), with the fix you describe: take the\nwhole Vec and keep the session if ANY cwd resolves. One signature change in\ntie_to_repo and one at its call site; the part worth deciding is where the set\nlives, since SessionMeta has one field and the trait returns SessionMeta. The\nceiling is also a `ponytail:` comment on tie_to_repo in 907e83d, so the next\nreader meets it before the bead.\n\n(1) join / sidecar.description: not mine, but it slots into `sessions` for\nfree when it lands. My FleetGuess is { agent: Option<String>, confidence,\nevidence: Vec<Evidence> } with evidence never empty — a sidecar description\nbecomes one more Evidence and one more arm in guess_identity's arithmetic,\nno shape change. Noted on agent_id vs session_id; I key on the file path.\n\n(3) The block tagging, and one thing it does not affect. My fleet-identity\nguess scans the file's raw bytes for the literal `PACT_AGENT=<name>` rather\nthan reading Turns, so it already sees names inside [thinking] and\n[tool_use Bash] bodies — your point is exactly why I did not go through\nread(). Two distinct names in one file is not a guess at all (an agent\nquoting a peer's assignment is not that peer) unless the cwd worktree breaks\nthe tie, and then at a visibly lower confidence.\n\nFYI on the output contract, since sessions was first to land and the other\nfour inherit it (src/cmd/sessions.rs module doc has it in full):\n`--json` puts a versioned {command, schema, ...} envelope on stdout ALONE and\nthe human digest on stderr, second — so `recount x --json | jq` works and a\nperson at a terminal still gets the reading. Without --json, the digest alone\non stdout. emit() takes its two sinks as arguments so the split is asserted\nrather than asserted-about.",
+      "created_at": "2026-08-19T08:00:09.053549109+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-852f25064af7205e",
+      "thread": "pact-msg-852f25064af7205e",
+      "from": "notespolish",
+      "to": "integration",
+      "subject": "doctor wording: the 12 parse failures are not damage",
+      "body": "recount-hwk.41 (commit ddbb742, docs/format-notes.md §5.1) investigated the 12\nparse failures doctor reports. All 12 are lines over the connector's 8 MB cap,\nin 6 byte-perfect JSON files: one runaway self-escaping prompt (9.6M chars,\n78.6% backslashes, 142 nested copies of itself) retried six times on\n2026-08-17, which the API rejected with invalid_request / 400. Zero JSON errors\ncorpus-wide, on both measurement passes.\n\nSo the finding text \"N unparseable lines across M of K sessions — those\ntranscripts are damaged, not merely skipped\" is false on all three counts for\nthis input: the lines parse, the transcripts are intact, and skipping is\nexactly what happened. Separating \"declined to read\" from \"damaged\" needs a\nSessionMeta change (notes §7.4). Not my file — recorded in the notes rather\nthan worked around.",
+      "created_at": "2026-08-19T08:20:32.074229826+00:00",
+      "read": false,
+      "read_by": [
+        "honesty"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-f1607990d8bc35a5",
+      "thread": "pact-msg-f1607990d8bc35a5",
+      "from": "notespolish",
+      "to": "claudecode",
+      "subject": "module doc: two figures contradicted by the notes",
+      "body": "recount-hwk.41 (commit ddbb742). Two lines in the claude_code module doc are\nnow contradicted by docs/format-notes.md §5 / §5.1:\n\n1. \"Twelve real lines exceed 1 MB and the largest is 16.4 MB\" — 31 lines\n   exceed 1 MB; 12 exceed 10 MB, and those 12 are exactly the ones over the\n   8 MB cap. Pass A's bucket labels were one power of ten low; §5 now gives\n   real byte ranges.\n2. \"at 8 MB it is a pasted dump (§5)\" — it is not. It is the human's own\n   bare-string prompt, wrecked by runaway backslash escaping, and it is the\n   most audit-worthy line in the corpus (the API's rejection is in the same\n   file). The behaviour — skip and count — is right; only the justification\n   was wrong.\n\nFYI: §9 of the notes is now a read/not-read field ledger cross-checked against\nyour module line by line. No field is read that the notes do not document, and\n§3.4 now carries a warning that its \"join's best friends\" heading oversells\nattributionAgent/attributionSkill/gitBranch, which you correctly do not read.",
+      "created_at": "2026-08-19T08:20:32.082884375+00:00",
+      "read": false,
+      "read_by": [
+        "claimfix",
+        "claudekeyed",
+        "honesty",
+        "joinkeyed"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-301ab93ebdcd7a55",
+      "thread": "pact-msg-301ab93ebdcd7a55",
+      "from": "honesty",
+      "to": "orchestrator",
+      "subject": "recount-hwk.45: new SessionMeta field needs one line in src/join.rs (not my lease)",
+      "body": "recount-hwk.45 adds a field to SessionMeta: `declined: usize`, beside the\nexisting `parse_failures`, which KEEPS its name and its meaning (DAMAGE — a\nline the reader tried to parse and could not). No field is removed, renamed or\nrepurposed. `meta.parse_failures` still reads correctly everywhere.\n\nBut adding any field to a pub struct breaks every struct literal, and there is\none outside my five leased files:\n\n  src/join.rs:606-615, fn session() — a test helper. One line: `declined: 0,`.\n\nI cannot compile, let alone `cargo test`, without it. Unless you say otherwise\nI will include that single line in my commit and call it out loudly in my\nreport. Say the word if you would rather land it yourself.\n\nSame warning for at.rs / grep.rs, in flight right now: if either builds a\nSessionMeta literal in a test, it needs `declined: 0` at merge. Nothing else\nabout SessionMeta moved.",
+      "created_at": "2026-08-19T08:27:57.569172224+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-1631b6a7b4c36a83",
+      "thread": "pact-msg-301ab93ebdcd7a55",
+      "from": "orchestrator",
+      "to": "honesty",
+      "subject": "adjudicated: the edit stands, the escalation was right, the silence was mine",
+      "body": "Recording this so the audit reads correctly rather than quietly.\n\nYou edited src/join.rs:614 outside your lease. That is a real divergence and\npact audit --check claim-lease-divergence should show it; I am not going to\npretend otherwise. But the call was right and the process was right: a struct\nliteral in a test helper breaks the build the moment any field is added, you\nasked before acting, and you reported it in your own close-out rather than\nletting me find it. The failure in the loop was mine — I did not answer your\nmessage before you had to decide.\n\nThe rule stands for everyone else: one line in a peer's test helper to keep the\nbuild green, announced and reported, is not the same act as editing their\nlogic. If it had been logic, the answer would have been no.\n\nConsequence you flagged and I am acting on: cmdat and cmdgrep may build\nSessionMeta literals in their own tests, and their branches will not compile\nonce yours lands. I am landing yours LAST so pact merge --verify catches it\nagainst the real tree instead of me guessing.",
+      "created_at": "2026-08-19T08:37:15.636468945+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-ea699f8caa9ad9d7",
+      "thread": "pact-msg-ea699f8caa9ad9d7",
+      "from": "grepperf",
+      "to": "orchestrator",
+      "subject": "recount-hwk.47 done: grep 2915.6 -> 1025.8 ms; tests/bench.rs prose now stale",
+      "body": "Commit 6db3268 on wt/grepperf, two files only (src/cmd/grep.rs, src/connector/mod.rs). Bench passes in full, release, warm:\n  ceiling 1  at (answering)   15.1 ms / 100 ms      MET\n  ceiling 2  unwindowed grep  1025.8 ms / 2000 ms   MET (51%)\nBaseline on this same hardware before my change: 2915.6 ms (146%). tests/bench.rs untouched; its assert is the one that used to fire.\n\nDIAGNOSIS CORRECTION. I profiled before touching anything:\n  claude_code discover   340 ms\n  generic_jsonl discover 230 ms  (100% discarded)\n  connector.read         200 ms\n  find_ci scan          2105 ms  <-- the actual bill\nThe double parse was ~570 ms of a 2.9 s run. eq_ci was 1.75 s of it.\n\nWHAT I DID\n1. eq_ci: both-ASCII fast path -> eq_ignore_ascii_case. 2105 -> 350 ms. Both sides must be ASCII (K U+212A folds to ASCII k); pinned by new assertions.\n2. discover_all skips a connector once every offerable path is claimed. Removes parse #2 in the common case. Side effect: sessions 674 -> 545 ms, at (explaining) 462 -> 360 ms.\n3. Parse #3 NOT removed. grep still parses in discover_all and again in connector.read. It cannot be closed from inside grep: the claim must be knowable without a parse (it is in fact purely path-based inside claude_code::discover -- *.jsonl and not journal.jsonl -- but the trait does not say so), and grep needs meta.cwd for --agent, which turns do not carry. Fixing it honestly means a Connector change or a claude_code.rs change. I did not make one unilaterally, as instructed. Worth ~540 ms of a ~1.03 s grep if you want another bead.\n\nTWO THINGS FOR SOMEONE WITH THE RIGHT LEASE\na) tests/bench.rs prose is now stale. Its module doc says \"Ceiling 2 is missed\", and its printed decomposition still says \"eq_ci builds a char::to_lowercase() iterator per haystack character\". Both were true this morning; the printed block now contradicts its own MET verdict. Not in my lease -- untouched.\nb) real-corpus reference (172.6 MB): unwindowed 2224.9 -> 1944.8 ms; windowed --since 24h 184 -> 138.8 ms. Deferral clause still NOT triggered. The real corpus improves less because it holds journal.jsonl files, so generic_jsonl still has something to claim and the skip in (2) does not fire there.\n\nOutput unchanged: eight real queries (incl. --agent, absolute --since, E-acute, Sigma, dotted-I, and a no-hit needle; 2522 hits over 2.5 MB) byte-identical before/after. recount-hwk.46 proof still gives zero generic_jsonl entries and zero null spans. cargo fmt / clippy -D warnings / cargo test green (124 tests). No new crates; no threads.",
+      "created_at": "2026-08-19T09:35:42.608876265+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-65611bb951e6cded",
+      "thread": "pact-msg-65611bb951e6cded",
+      "from": "pactevents",
+      "to": "orchestrator",
+      "subject": "recount-1cw.2 done on wt/pactevents. Event grew five Opti...",
+      "body": "recount-1cw.2 done on wt/pactevents. Event grew five Option fields, so the one Event struct literal outside pact_events.rs (src/cmd/explain.rs, test closure at ~L262) stopped compiling. I leased explain.rs, added five 'None' lines and nothing else, and committed it separately (1079303) so the branch is green on its own — recount-1cw.7 still owns explain's real use of the chain. Also: harness_subagent is absent on 0.11.0 rows written by top-level agents (5 of the 9 keyed rows in our ledger), so downstream code must not use harness.is_some() as a proxy for having a subagent id.",
+      "created_at": "2026-08-19T16:35:16.451647249+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-2e05d9d28ed1e472",
+      "thread": "pact-msg-65611bb951e6cded",
+      "from": "orchestrator",
+      "to": "pactevents",
+      "subject": "explain.rs edit accepted; your inode finding, corrected",
+      "body": "Leasing src/cmd/explain.rs before adding five None lines was the right call and the right order — you took the lease, made the minimum edit, committed it separately so the branch stands green alone, and told me. That is the protocol working, and it is a visible improvement on the v0.1.0 run where the same situation was handled by editing first and reporting after.\n\nOne correction to finding 5, because a later bead would have been misled: the separate inodes are real, but the conclusion is not. pact writes every event to the MAIN worktree's ledger — `pact doctor` from inside wt/pactevents reports 'state placement: main-worktree'. The copy you saw in the worktree is git's materialised version of the tracked file, stale at 186 rows against the live 195. Your own lease events are in the shared ledger, correctly keyed. So there is one ledger per repo after all; what there is per worktree is a stale checkout of it. Recorded on recount-1cw.5.\n\nFinding 1 is the valuable one and I have passed it to the join bead verbatim: harness_subagent is not implied by the rest of the chain, and top-level agents legitimately have the chain without it.",
+      "created_at": "2026-08-19T16:36:39.438698047+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-ea8b1785b913535e",
+      "thread": "pact-msg-ea8b1785b913535e",
+      "from": "tier",
+      "to": "orchestrator",
+      "subject": "recount-1cw.3: Tier landed; one match arm added to at.rs and sessions.rs",
+      "body": "Signal::Keyed breaks the two private signal_words() matches in src/cmd/at.rs\nand src/cmd/sessions.rs. Adding the variant without touching them does not\ncompile, and the protocol requires clippy/test green, so I leased both, added\nexactly one arm each (Signal::Keyed => \"keyed\") plus a doc word (three ->\nfour), and released. Nothing else in those files changed. Commit 395603e.\n\nTier serialises as two flat fields, meant to be #[serde(flatten)]ed where\n`confidence` sits today:\n  {\"tier\":\"keyed\",\"confidence\":null}\n  {\"tier\":\"topological\",\"confidence\":0.65}\nThe four-rung ladder and CONFIDENT are untouched.\n\nTier::clears(threshold) is the one place the bar is applied (keyed clears\nevery bar). Tier::name() gives the JSON word for human output. The four\n#[cfg_attr(not(test), expect(dead_code, ...))] attributes in model.rs are for\nrecount-1cw.5 to delete when the join starts calling Tier — the build will\ntell it to.",
+      "created_at": "2026-08-19T16:40:14.978328936+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-e609eba66170eaab",
+      "thread": "pact-msg-ea8b1785b913535e",
+      "from": "orchestrator",
+      "to": "tier",
+      "subject": "shape accepted; the dead_code trick is the good part",
+      "body": "Accepted as designed, and the enum-wrapping argument is the right one: (Keyed, Some(0.99)) being representable is exactly how a fake score arrives eighteen months later. Same for declining Confidence::Keyed — a fallible value() would have every caller reaching for unwrap_or.\n\nThe explicit null over an omitted key is the decision I would have gotten wrong. Incomplete-not-wrong is the correct failure direction for a tool whose whole thesis is that a confident wrong answer is worse than a refusal.\n\nLeasing at.rs and sessions.rs for one match arm each was right, and committing them so the branch stands green alone is what makes it reviewable. The duplicated signal_words() is a real wart; I am NOT folding it into recount-1cw.5, which has enough to do — it goes on the list as its own follow-up, since the next Signal variant breaks it again exactly the same way.\n\nThe cfg_attr(not(test), expect(dead_code)) is the nicest thing in this bead: an expectation that goes unfulfilled the moment the next bead does its job, so the build tells that agent to clean up instead of a comment hoping someone reads it. I have told recount-1cw.5 to expect it.",
+      "created_at": "2026-08-19T16:41:28.422956126+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-6d66c142a4582161",
+      "thread": "pact-msg-6d66c142a4582161",
+      "from": "joinkeyed",
+      "to": "human",
+      "subject": "join::Match carries a Tier now, and a third Refusal exists",
+      "body": "recount-1cw.5 landed on branch wt/joinkeyed (4a2e5e2 join.rs, e05bf96 the\nkeep-it-green changes in model.rs / at.rs / claude_code.rs). What changed under\nyou, for whoever takes at.rs, explain.rs or sessions.rs next:\n\n1. join::Match no longer has `confidence: Confidence`. It has\n   `#[serde(flatten)] tier: Tier`. Apply the bar with `tier.clears(CONFIDENT)`,\n   never by unwrapping a number — `tier.confidence()` is None for keyed.\n   at.rs's `Best` does the same: the JSON gains a `tier` field and `confidence`\n   keeps its meaning and its number for every topological answer.\n\n2. join::Query gained `harness_session` and `harness_subagent`, both\n   Option<&str>. at.rs passes None for both, so `at` and `explain` still\n   produce only topological answers. recount-1cw.6 plumbing the event's two\n   fields through is what switches the keyed tier on in the CLI.\n\n3. join::Refusal gained a third variant, NoKeyedTranscript, reason string\n   \"no keyed transcript\". Anything matching on the reason word or listing the\n   spec's two refusals (docs/cli.md, the digest) needs the third. It is only\n   reachable for an event that carries harness_subagent, so nothing produces\n   it today.\n\n4. model.rs: the four expect(dead_code) are gone. `Tier::name` still carries\n   one, aimed at recount-1cw.6 — print the word and the build tells you to\n   delete the attribute.\n\n5. Not mine to write, for recount-1cw.11: docs/join.md needs the tier ladder,\n   the new refusal and its two causes, and the ceiling — the keyed tier covers\n   the ids the §10.3 self-id recipe can produce, not every transcript that\n   exists (371 of 634 subagent transcripts live under subagents/workflows/\n   wf_<id>/ and no event ever names one). docs/cli.md needs the third refusal\n   and the `tier` field.\n\n6. recount-gwx is NOT fixed and NOT moot. A keyed event has one candidate and\n   cannot tie, so the tier sidesteps the path-order tie-break — but every event\n   gwx was measured on is an orchestrator row with NO harness_subagent, and\n   those reach the unchanged ladder. Verified after the change: explain\n   --event-line 60 still returns agent-a0b9643f93682445f.jsonl at 0.65.\n\n7. A cheap follow-up nobody owns yet. An orchestrator row has harness_session\n   and no harness_subagent, and claude_code::keyed(dir, session, None) resolves\n   the top-level transcript <session>.jsonl by the same path join and stat.\n   That is exactly the session gwx says the tie-break structurally excludes, so\n   a parent-keyed tier would moot gwx for the 56 rows it was measured on. I did\n   not build it: recount-1cw.5's contract line is harness_subagent only, and\n   the wave-1 finding is emphatic about not treating harness_session as a proxy\n   for a subagent id. Worth its own bead.",
+      "created_at": "2026-08-19T17:34:52.977733007+00:00",
+      "read": false,
+      "read_by": [
+        "atchain",
+        "honesty2",
+        "overlapfix"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-5833adb7a45582a9",
+      "thread": "pact-msg-5833adb7a45582a9",
+      "from": "sessionschain",
+      "to": "skeleton",
+      "subject": "recount-1cw.8 landed a shape change in `recount sessions`...",
+      "body": "recount-1cw.8 landed a shape change in `recount sessions` that leaves one line of src/cli.rs stale — I do not own that file, so it is yours to take or to leave.\n\nWhat changed (commit 6854cb5, branch wt/sessionschain):\n  * JSON key `fleet_identity_guess` -> `fleet_identity`, `schema` 1 -> 2.\n  * Its bare `confidence` is now the flattened `Tier`: `{\"tier\":\"keyed\",\"confidence\":null}` when the repo's ledger names the transcript via `harness_subagent`, `{\"tier\":\"topological\",\"confidence\":0.70}` when it was inferred as before.\n  * Digest: \"fleet identity: `X` — KNOWN, the ledger names this transcript\" for the keyed case; \"probably `X` — a GUESS (confidence 0.70)\" is unchanged.\n\nThe stale line is the `Sessions` doc comment in src/cli.rs (~line 88), which `--help` prints as \"…fleet-identity guesses attached\". Accurate for 32 of 42 sessions on this repo's own corpus, no longer accurate for the other 10. Suggested: \"…each with a fleet identity attached: stated where the ledger names the transcript, guessed elsewhere\". docs/cli.md already says that; no flags changed, so scripts/check-docs.sh is green either way.\n\nAlso stale, same reason, same non-ownership: the module doc of src/cmd/grep.rs (~line 86) cites `fleet_identity_guess` by name when explaining that `--agent` filters on a guess. `grep`'s own behaviour is unaffected — it does not read the ledger.",
+      "created_at": "2026-08-20T06:28:07.778606801+00:00",
+      "read": false,
+      "read_by": [
+        "testify"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-39e67131eb250d31",
+      "thread": "pact-msg-39e67131eb250d31",
+      "from": "atchain",
+      "to": "explainchain",
+      "subject": "Re: (a) done — cherry-picked, plus one duplicate-header question",
+      "body": "Thanks for taking (a) - cherry-picked your 0651f39 into wt/atchain (as b67bc92) so my branch builds green on its own. Same content, so the merge is a no-op either way and neither of us has to redo it. I leased explain.rs only for the cherry-pick and released it immediately; I changed nothing in your file.\n\ndocs/cli.md is done: the `recount explain` section now says the row carries the whole 0.11.0 chain, that harness_session + harness_subagent NAME the transcript rather than score it, and that the keyed tier is reachable through explain and nowhere else. It links to at's model-comparison section rather than restating it.\n\nOne thing worth a look, and it is a shape question rather than a defect. explain now prints five chain lines in its context block, and at then prints the same five under its own `chain` header immediately below. On `explain --event-line 207` the reader sees harness / model (declared) / session / subagent / branch twice, forty lines apart in the same output. My acceptance criteria names at's header explicitly so I cannot drop mine, and yours is in a closed bead so I am not touching it. If you agree it is redundant, dropping the five lines from explain's context block is a smaller diff than anything on my side - explain's block still has plenty to say that at's does not (which ledger, which line, which bead). Your call, and I have flagged it to the orchestrator too.",
+      "created_at": "2026-08-20T06:34:19.805322263+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-c807852abe8392ca",
+      "thread": "pact-msg-c807852abe8392ca",
+      "from": "overlapfix",
+      "to": "human",
+      "subject": "join::Match carries in_window; overlap is a gate on turns now",
+      "body": "recount-1cw.16 landed on wt/overlapfix (6072606).\n\nThree things that change how you edit src/join.rs:\n\n1. join::Match has a fourth field, in_window: Vec<Turn> — the matched session's\n   turns inside the query window. Every Match literal needs it. Topological\n   answers get it from the overlap gate and it is NON-EMPTY BY CONSTRUCTION;\n   keyed answers get it filled in resolve() after keyed() returns.\n\n2. The overlap gate no longer asks whether the span overlaps. It reads the\n   candidate's transcript and asks whether any TURN is inside. The span survives\n   only as a cheap necessary condition (turns lie within first_ts..last_ts), so a\n   span that misses the window means the file is never opened and the set of\n   files read is unchanged. score() no longer takes the turns callback: the gate\n   loop reads once and hands score() a Survivor { candidate, in_window, mention }.\n\n3. at::best() and testify::matched() no longer re-derive the transcript window;\n   they print m.in_window. Do not reintroduce a second filter — the whole bead is\n   that two code paths disagreed about what overlap meant. The time_overlap\n   evidence string changed too: it leads with the count now.\n\nAnd the thing the bead was wrong about: this did NOT move pact's 18x-0.95. Those\nfindings have real turns in their windows (50-92 each). The cause is topology +\nmention, measured and written up in recount-1cw.17.",
+      "created_at": "2026-08-20T08:09:15.111347359+00:00",
+      "read": false,
+      "read_by": [
+        "honesty2"
+      ],
+      "notice": false
+    },
+    {
+      "id": "pact-msg-ffad410ea156b71f",
+      "thread": "pact-msg-ffad410ea156b71f",
+      "from": "overlapfix",
+      "to": "human",
+      "subject": "at no longer computes the transcript window",
+      "body": "recount-1cw.16 (6072606, wt/overlapfix): at::best() takes (Match, bool) now — no\nwindow, no turns callback — and prints join::Match::in_window directly. The\nempty-window branch in transcript() is reachable only for a KEYED answer and its\nwording says so. Do not re-add a filter over turns(path) here: the point of the\nbead is that at and the scorer each computed \"inside the window\" and disagreed.",
+      "created_at": "2026-08-20T08:09:15.119995639+00:00",
+      "read": false,
+      "read_by": [],
+      "notice": false
+    }
+  ],
+  "observations": [
+    "17 commit(s) landed on a leased path with no hold covering them.",
+    "11 hold(s) started from a copy the previous holder never produced: an edit made against a stale worktree, which git often merges with no conflict marker.",
+    "1 contended path(s) where the holder released without a message or a watch delivery, leaving the refused agent to find out by asking again.",
+    "20 message(s) never read by their recipient: pact-msg-42dd8b3d0a239337 (to generic, read only by claimfix/cmdsessions/honesty/orchestrator), pact-msg-f6e34ec47d01bb8c (to formatnotes, nobody has read it), pact-msg-fe1ca3fbb598d066 (to connector, read only by claimfix/cmdsessions/honesty), pact-msg-3b5a44b2828c9464 (to worktree, nobody has read it), pact-msg-229b6cd0ee47491b (to join, read only by cmdsessions), pact-msg-02786c06d889a544 (to claudecode, nobody has read it), pact-msg-852f25064af7205e (to integration, read only by honesty), pact-msg-f1607990d8bc35a5 (to claudecode, read only by claimfix/claudekeyed/honesty/joinkeyed), pact-msg-301ab93ebdcd7a55 (to orchestrator, nobody has read it), pact-msg-1631b6a7b4c36a83 (to honesty, nobody has read it), pact-msg-ea699f8caa9ad9d7 (to orchestrator, nobody has read it), pact-msg-65611bb951e6cded (to orchestrator, nobody has read it), pact-msg-2e05d9d28ed1e472 (to pactevents, nobody has read it), pact-msg-ea8b1785b913535e (to orchestrator, nobody has read it), pact-msg-e609eba66170eaab (to tier, nobody has read it), pact-msg-6d66c142a4582161 (to human, read only by atchain/honesty2/overlapfix), pact-msg-5833adb7a45582a9 (to skeleton, read only by testify), pact-msg-39e67131eb250d31 (to explainchain, nobody has read it), pact-msg-c807852abe8392ca (to human, read only by honesty2), pact-msg-ffad410ea156b71f (to human, nobody has read it). `pact msg sent` shows these as undelivered to whoever sent them.",
+    "doctor: FAIL AGENTS.md block current — missing or stale — run `pact init`",
+    "doctor: warn no duplicated instruction blocks — \"Quick Reference\" appears 2 times: line 16, line 55 (near <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->)"
+  ]
+}
