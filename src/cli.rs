@@ -1,13 +1,18 @@
 //! The complete command-line surface, in one file, once.
 //!
-//! This is a coordination contract as much as a parser: no later bead adds a
-//! subcommand or a flag, so every command and every flag the spec's "Commands
-//! (all --json; human digest second)" section names exists here now, parsing,
-//! before the code behind it does. A bead that finds it needs a flag that is
-//! not here changes the spec first.
+//! This is a coordination contract as much as a parser: every command and every
+//! flag the spec's "Commands (all --json; human digest second)" section names
+//! exists here, parsing, before the code behind it does. A bead that finds it
+//! needs a flag that is not here changes the spec first.
+//!
+//! 0.2.0 adds one command the 0.1.0 spec did not name — `testify`, which reads
+//! `pact audit --json` and annotates it. That is a *new* obligation from the
+//! release contract rather than a flag some bead wanted mid-build, and it went
+//! through the same gate: `--help`, `docs/cli.md` and the generated completions
+//! in the bead that added it.
 //!
 //! `--json` is global rather than per-command because the spec applies it to
-//! all five ("all --json"), and a global flag can be written either side of
+//! all of them ("all --json"), and a global flag can be written either side of
 //! the subcommand, which is what people actually type.
 //!
 //! `completion` is the one command the spec does not name, and the one that
@@ -45,7 +50,7 @@ in the README for the case where it does exactly that.",
     after_long_help = "\
 EXIT CODES
   0  answered
-  1  no confident match (`at`, `explain`), or a hard error
+  1  no confident match (`at`, `explain`, `testify`), or a hard error
   2  usage error from the parser
 
 EXAMPLES
@@ -55,11 +60,17 @@ EXAMPLES
 
   recount sessions --repo . --since 2h
       The transcripts belonging to this repo in the last two hours, each with
-      a fleet-identity guess marked as a guess.
+      a fleet identity: stated where the ledger names the transcript, and
+      marked as a guess everywhere else.
 
   recount explain --repo . --event-line 1
       Take event 1 out of .pact/events.jsonl and show the transcript behind
       it. One command from an audit finding to testimony.
+
+  pact audit --check double-win --json | recount testify --repo .
+      Every finding of an audit, annotated with the transcript behind it and
+      the tier that named it. Exit 1 if any finding went unanswered, and the
+      output says which.
 
   recount at --repo . --agent skeleton --ts 2026-08-19T07:13:57Z
       The session driving that identity at that moment, or exit 1: either a
@@ -85,7 +96,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Sessions whose cwd resolves into the repo or its worktrees, fleet-identity guesses attached
+    /// Sessions whose cwd resolves into the repo or its worktrees, each with a fleet identity attached: stated where the ledger names the transcript, guessed elsewhere
     Sessions(SessionsArgs),
     /// Resolve the session driving an identity at a moment; print the transcript window
     #[command(long_about = "\
@@ -122,6 +133,36 @@ Events are numbered 1-based over physical lines, so --event-line 5 is the line
 EXIT CODES: inherited from `at` unchanged — 0 confident match, 1 otherwise.
 An --event-line past the end is a clean error naming the ledger's length.")]
     Explain(ExplainArgs),
+    /// Read `pact audit --json` and annotate every finding with the transcript behind it
+    #[command(long_about = "\
+Read a `pact audit --json` document from stdin or --file, and for every finding
+that carries an agent and a timestamp, run the join and attach the transcript
+window and the tier that produced it.
+
+  pact audit --check double-win --json | recount testify --repo .
+
+The findings come back out ANNOTATED, not summarised: each one is echoed
+verbatim under `finding` with the testimony beside it, so this is a stage in a
+pipeline rather than the end of one.
+
+pact's document has no `findings` key — each check writes its own array, and
+the element shapes differ per check. testify reads every top-level array that
+is not one of the four statistics arrays (`agents`, `annotations`, `per_agent`,
+`top_contended`), and finds the agent and the moment inside an element by name
+shape (`agent`, `*_agent`; `at`, `*_at`), so a check pact adds tomorrow is
+testified without a change here.
+
+A finding carrying no agent/timestamp pair — a topology mismatch names a
+checkout, not an agent — is passed through untouched and counted, not failed.
+
+EXIT CODES
+  0  every finding that could be testified was, INCLUDING an empty findings
+     set: a clean audit is not a failure
+  1  some finding had an agent and a moment and still got no confident match.
+     `untestified` lists exactly which, and why, on both streams
+  2  usage error from the parser. Malformed input is not one of these: it is a
+     hard error, one sentence on stderr and no document at all")]
+    Testify(TestifyArgs),
     /// Connector roots, session counts, parse-failure tallies, join-readiness
     #[command(long_about = "\
 Report whether a join can run here at all, and if not, why not: connector
@@ -238,6 +279,21 @@ pub struct ExplainArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct TestifyArgs {
+    /// Repository whose sessions — and whose .pact/events.jsonl — the findings are joined against
+    #[arg(long, value_name = "PATH")]
+    pub repo: PathBuf,
+
+    /// Read the audit document from this file instead of stdin
+    #[arg(long, value_name = "PATH")]
+    pub file: Option<PathBuf>,
+
+    /// Half-width of the match window either side of each finding's moment
+    #[arg(long, value_name = "DURATION", default_value = "5m", value_parser = parse_duration)]
+    pub window: Duration,
+}
+
+#[derive(Debug, Args)]
 pub struct DoctorArgs {
     /// Repository to check join-readiness against. The spec writes `recount
     /// doctor` bare, so this defaults to the current directory rather than
@@ -320,6 +376,35 @@ mod tests {
             .unwrap();
         match c.command {
             Command::Explain(e) => assert_eq!(e.event_line, 7),
+            other => panic!("wrong command: {other:?}"),
+        }
+
+        let c = Cli::try_parse_from([
+            "recount",
+            "testify",
+            "--repo",
+            "/r",
+            "--file",
+            "/a/audit.json",
+            "--window",
+            "10m",
+        ])
+        .unwrap();
+        match c.command {
+            Command::Testify(t) => {
+                assert_eq!(t.file, Some(PathBuf::from("/a/audit.json")));
+                assert_eq!(t.window, Duration::minutes(10));
+            }
+            other => panic!("wrong command: {other:?}"),
+        }
+
+        // ... and `--file` is optional, because stdin is the pipeline case.
+        let c = Cli::try_parse_from(["recount", "testify", "--repo", "/r"]).unwrap();
+        match c.command {
+            Command::Testify(t) => {
+                assert_eq!(t.file, None);
+                assert_eq!(t.window, Duration::minutes(5));
+            }
             other => panic!("wrong command: {other:?}"),
         }
 

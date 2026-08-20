@@ -16,6 +16,7 @@ pub mod doctor;
 pub mod explain;
 pub mod grep;
 pub mod sessions;
+pub mod testify;
 
 /// Answered.
 pub const EXIT_OK: u8 = 0;

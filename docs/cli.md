@@ -14,11 +14,11 @@ build.
 | code | meaning |
 |---:|---|
 | 0 | answered |
-| 1 | no confident match (`at`, `explain`), or a hard error |
+| 1 | no confident match (`at`, `explain`, `testify`), or a hard error |
 | 2 | usage error from the parser (clap) |
 
-**A refusal is an answer, not a failure.** `at` and `explain` exit 1 when they
-decline to name a session, and they print the reason and the evidence while
+**A refusal is an answer, not a failure.** `at`, `explain` and `testify` exit 1
+when they decline to name a session, and they print the reason and the evidence while
 doing it. A caller that treats exit 1 as an error has it backwards: the tool
 exists because a confident wrong answer is worse than a scored one, and exit 1
 is where the scoring shows. Distinguish the two cases by the payload — under
@@ -65,7 +65,7 @@ in the README rather than patched into `spec.md`, which is treated as frozen.
 
 ## Commands
 
-Six subcommands. `--json` is global and works on all of them.
+Seven subcommands. `--json` is global and works on all of them.
 
 ### `recount sessions`
 
@@ -239,6 +239,83 @@ Exit codes are inherited from `at` unchanged, and so is the JSON envelope: the
 document says `"command": "at"`, with the explain header appearing only in the
 digest.
 
+### `recount testify`
+
+```
+recount testify --repo <PATH> [--file <PATH>] [--window <DURATION>] [--json]
+```
+
+Read a `pact audit --json` document from **stdin** or `--file`, and for every
+finding that carries an agent and a timestamp, run the join and attach the
+transcript window and the tier that produced it. This is the line the whole
+release exists to make possible:
+
+```
+pact audit --check double-win --json | recount testify --repo .
+```
+
+`--repo` is the repository whose sessions — and whose `.pact/events.jsonl` —
+the findings are joined against. Inside a worktree that ledger is a stale git
+copy, so point `--repo` at the main checkout. `--window` is the half-width
+either side of each finding's own moment, default `5m`, exactly as on
+[`recount at`](#recount-at).
+
+**It annotates; it does not summarise.** Every finding comes back out verbatim
+under `finding`, with the testimony beside it, so `testify` is a stage in a
+pipeline rather than the end of one: whatever the caller was going to do with
+`pact audit --json` it can still do.
+
+#### What counts as a finding
+
+pact's audit document has no `findings` key. Each check writes its own array —
+`double_wins`, `stale_holds`, `topology_mismatches`, twelve of them today — and
+the element shapes differ per check. So the reader is structural, not
+schematic:
+
+* every top-level array is a finding list **except** the four statistics arrays
+  `agents`, `annotations`, `per_agent` and `top_contended`;
+* inside an element the agent and the moment are found by *name shape* —
+  `agent`, `*_agent`, plus the aliases pact's own structs use (`incoming_agent`,
+  `refused_agent`, `acquired_by`, `holder`, `author`); `at`, `*_at`, `since`;
+* a `line`, `incoming_line` or `opened_line` is taken as a ledger line, which is
+  how a finding reaches the whole attribution chain and, with it, the **keyed
+  tier** — see [join.md](join.md).
+
+A check pact adds tomorrow is testified without a change to recount. A bare
+JSON array is read as a findings list too, which is what `jq '.stale_holds'`
+hands over.
+
+`opened_at` beats `closed_at` deliberately: the moment worth reading a
+transcript around is when the agent *took* the lease, not when the sweep closed
+it.
+
+#### Findings with nobody in them
+
+A topology mismatch names a checkout, not an agent, and carries no moment. It
+is a real finding and it is **not** an error: it is passed through untouched
+and counted under `passed_through`. Nothing was asked of the join, so nothing
+is reported as unanswered.
+
+#### Exit codes
+
+| | |
+|---:|---|
+| 0 | every finding that could be testified was — **including an empty findings set**, because a clean audit is not a failure |
+| 1 | some finding had an agent and a moment and still got no confident match. `untestified` lists exactly which, and why, on both streams |
+
+Malformed input is neither: it is a hard error, one sentence on stderr and no
+document at all.
+
+A sub-threshold candidate counts as untestified and is printed with its
+evidence and **without** its transcript, for the reason
+[`at`](#recount-at) withholds it: a guess under a heading that reads like
+testimony is the misdiagnosis recount was built to prevent.
+
+The declared-versus-recorded [model comparison](#declared-model-versus-recorded-model)
+is not run here. `testify` prints the ledger line each finding came from, and
+`recount explain --event-line <N>` is one command away for a finding worth that
+much attention.
+
 ### `recount doctor`
 
 ```
@@ -373,6 +450,47 @@ failed comparison.
               "occurrences": 17,            // in that turn; nothing is hidden
               "block_guess": <"tool_result"|…|null> } ] }
 ```
+
+### `testify`
+
+```jsonc
+{ "command": "testify", "schema": 1,
+  "repo": "/abs/path",
+  "source": "stdin",                        // or the --file path
+  "check": "stale-holds",                   // the audit document's own `check`; null for a summary
+  "window_secs": 300,                       // --window, the half-width each side
+  "session_dirs": [ … ],
+  "considered": 44,                         // sessions discovered; unwindowed, once for all findings
+  "threshold": 0.5,
+  "totals": { "findings": 2, "testified": 1,
+              "untestified": 1,             // had an agent and a moment, got no confident match
+              "passed_through": 0 },        // had neither; not a failure
+  "findings": [ {
+      "check": "stale_holds",               // the array it came out of
+      "index": 0,
+      "agent": <name|null>,                 // null on a pass-through
+      "ts": <rfc3339|null>,
+      "event_line": <n|null>,               // the ledger line it named, if it named one
+      "outcome": "match" | "low_confidence" | "refused" | "passed_through",
+      "testimony": {                        // null when refused or passed through
+          "session": { "path": …, "cwd": …, "connector": "claude_code", … },
+          "tier": "keyed" | "topological",
+          "confidence": null,               // null when "tier" is "keyed"
+          "confident": true,
+          "evidence": [ { "signal": …, "detail": "…" }, … ],
+          "window": { "since": …, "until": … },
+          "transcript": [ { "ts": …, "role": …, "text": …, "line": … }, … ] },
+      "refusal": { "reason": "no cwd match" | "no overlap" | "no keyed transcript",
+                   "detail": "…" },         // null unless "outcome" is "refused"
+      "finding": { … }                      // the finding as pact wrote it, unchanged
+    } ],
+  "untestified": [ "stale_holds[1] agent `integration` at … — no cwd match: …" ] }
+```
+
+`finding` is the whole point: nothing pact wrote is dropped, so a later stage of
+the pipeline still sees the document it expected. `transcript` is `[]` unless
+`outcome` is `"match"`. The exit code is 1 if and only if `untestified` is
+non-empty.
 
 ### `doctor`
 

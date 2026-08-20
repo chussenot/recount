@@ -10,8 +10,9 @@
 //!
 //! Exit codes, fixed here so every command agrees: `0` answered, `1` no
 //! confident match (or a hard error). `2` comes from clap, for a usage error.
-//! Only `at` (and `explain`, which calls it) can return `1` for a refusal; the
-//! refusal always names its reason.
+//! Only `at` (and `explain`, which calls it) and `testify` can return `1` for
+//! a refusal; the refusal always names its reason, and `testify`'s names every
+//! finding it could not answer.
 //!
 //! The crate-wide `#![allow(dead_code)]` that stood here through the build is
 //! gone, along with the `unimplemented` placeholder it was covering for: every
@@ -40,6 +41,7 @@ fn main() -> ExitCode {
         Command::At(a) => cmd::at::run(a, cli.json),
         Command::Grep(a) => cmd::grep::run(a, cli.json),
         Command::Explain(a) => cmd::explain::run(a, cli.json),
+        Command::Testify(a) => cmd::testify::run(a, cli.json),
         Command::Doctor(a) => cmd::doctor::run(a, cli.json),
         Command::Completion(a) => cmd::completion::run(a, cli.json),
     };
