@@ -74,19 +74,33 @@ recount sessions --repo <PATH> [--since <WHEN>] [--until <WHEN>] [--json]
 ```
 
 Sessions whose cwd resolves into the repo or its worktrees, each with a
-fleet-identity *guess* attached. `--repo` is required and is resolved to the
-encoded session directories of the repo and its worktrees before any file is
-opened.
+fleet identity attached — *stated* where the repo's ledger names the
+transcript, *guessed* everywhere else. `--repo` is required and is resolved to
+the encoded session directories of the repo and its worktrees before any file
+is opened.
 
 `--since` and `--until` take RFC 3339 (`2026-08-19T07:13:57Z`) or a duration
 ago (`2h`, `1d`). Only `--since` prunes files unopened: transcripts are
 append-only, so mtime bounds the *last* turn and never the first — see
 [performance.md](performance.md).
 
-Nothing here states an identity as a fact. The key is `fleet_identity_guess`,
-its `agent` is nullable, and its `evidence` is never empty: when the agent is
-null the evidence says why it could not be told, which is itself the answer.
-See [join.md](join.md).
+The key is `fleet_identity`, and its `tier` says which kind of answer it is.
+`keyed` means pact's ledger stamped this transcript's id on an event
+(`harness_subagent`), so the identity is stated rather than inferred: the
+evidence names the `.pact/events.jsonl` line that says so, and `confidence` is
+`null`, because there is no number to give. `topological` is the guess it
+always was, with the score it always had. `agent` is nullable on either tier
+and `evidence` is never empty: when the agent is null the evidence says why it
+could not be told, which is itself the answer. See [join.md](join.md).
+
+Most sessions are `topological` and that is the expected result — pact only
+began stamping the chain in 0.11.0, and no later version can key a row written
+before it.
+
+> **Changed in 0.2.0** (`schema` 1 → 2): the key was `fleet_identity_guess`
+> and carried a bare `confidence`. A stated fact under a key called *guess*
+> would be the same error this output exists to avoid, so it was renamed and
+> the tier added. Readers that thresholded `confidence` must handle `null`.
 
 ### `recount at`
 
@@ -198,7 +212,7 @@ never absent.
 ### `sessions`
 
 ```jsonc
-{ "command": "sessions", "schema": 1,
+{ "command": "sessions", "schema": 2,
   "repo": "/abs/path",                      // canonical
   "window": { "since": <rfc3339|null>, "until": <rfc3339|null> },
   "session_dirs": ["/home/u/.claude/projects/-abs-path", …],
@@ -212,9 +226,10 @@ never absent.
       "turn_count": 660, "parse_failures": 0, "declined": 0,
       "worktree": <name|null>,              // null: the cwd did not say
       "repo_match": "cwd" | "session_dir",
-      "fleet_identity_guess": {
+      "fleet_identity": {
         "agent": <name|null>,               // null: we cannot tell
-        "confidence": 0.0,
+        "tier": "keyed",       "confidence": null,   // the ledger names it
+        "tier": "topological", "confidence": 0.0,    // …or one of these two
         "evidence": [ { "signal": "topology", "detail": "…" }, … ] } } ],
   "warnings": [] }                          // e.g. a worktree git lists but is gone
 ```
