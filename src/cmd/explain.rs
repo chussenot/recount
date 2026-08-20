@@ -11,12 +11,22 @@
 //!
 //! # Why `run_with` and not `run`
 //!
-//! A ledger row carries two things the `at` CLI has no flag for, and they are
-//! the first and third links of the topological join: `invoked_from` (the
+//! A ledger row carries things the `at` CLI has no flag for, and `explain` is
+//! the only command that has them, because it is the only command that reads an
+//! event. Three of them are links of the topological join: `invoked_from` (the
 //! worktree the agent acted from) and, inside `detail`, the bead id that the
-//! transcript-mention tiebreaker looks for. Calling plain [`crate::cmd::at::run`]
-//! would throw away the strongest signals `explain` uniquely has, and would
-//! score a *worse* join than the one the finding already handed us.
+//! transcript-mention tiebreaker looks for. The fourth is not a signal to score
+//! at all — it is an answer. A pact 0.11.0 row names the transcript it was
+//! written from (`harness_session` + `harness_subagent`), and
+//! [`crate::join::resolve`] takes that as the keyed tier: a path join and a
+//! `stat`, no cwd, no clock, no score.
+//!
+//! **That handoff is why this line exists.** `at` invoked from the CLI has no
+//! flag that can name a transcript, so its every answer is inferred; the keyed
+//! tier is reachable from a real command only through here. Calling plain
+//! [`crate::cmd::at::run`] would not merely score a *worse* join than the one
+//! the finding already handed us — it would throw away a certainty and replace
+//! it with a guess.
 //!
 //! # Where the event itself appears
 //!
@@ -59,7 +69,13 @@ pub fn run(args: &ExplainArgs, json: bool) -> Result<u8> {
         let _ = context(&event, &path, &mut io::stdout());
     }
 
-    crate::cmd::at::run_with(&at_args, event.invoked_from.as_deref(), bead(&event), json)
+    // The whole event, not the fields picked out of it: `at` wants
+    // `invoked_from` for the topological chain, `harness_session` and
+    // `harness_subagent` for the keyed tier, and `harness`, `model` and
+    // `branch` for its own header — pact stamps them as one unit and they
+    // travel as one. `bead` stays separate because it is not a field: it is
+    // this module's reading of `detail`.
+    crate::cmd::at::run_with(&at_args, Some(&event), bead(&event), json)
 }
 
 /// Event `n` of the ledger, or the reason there is none — split from [`run`]
@@ -94,11 +110,48 @@ fn context(e: &Event, path: &Path, w: &mut dyn Write) -> io::Result<()> {
     if let Some(d) = &e.detail {
         writeln!(w, "  detail   {d}")?;
     }
+    chain(e, w)?;
     match bead(e) {
         Some(b) => writeln!(w, "  bead     {b} — also looked for in the transcript")?,
         None => writeln!(w, "  bead     none in detail — agent name only")?,
     }
     writeln!(w)
+}
+
+/// The pact 0.11.0 attribution chain, in the words the row used.
+///
+/// Every field is optional and every one is printed only if the row carries it:
+/// a pre-0.11.0 ledger prints none of this and is not a degraded ledger, it is
+/// an older one. Absent fields are silent rather than `none`, unlike the bead
+/// line below — a missing bead means the tiebreaker had nothing to look for,
+/// which changes how you read the evidence, whereas a missing chain just means
+/// the event predates it.
+///
+/// `model` is marked `(declared)` and always will be. pact records what the
+/// spawner asked for in `PACT_MODEL`; whether that is the model that actually
+/// answered is a question only the transcript can settle, and settling it is
+/// `at`'s job, in `at`'s header, against the session it resolved. Printing the
+/// declaration unmarked here would read as an observation.
+fn chain(e: &Event, w: &mut dyn Write) -> io::Result<()> {
+    if let Some(h) = &e.harness {
+        writeln!(w, "  harness  {h}")?;
+    }
+    if let Some(m) = &e.model {
+        writeln!(w, "  model    {m} (declared)")?;
+    }
+    if let Some(s) = &e.harness_session {
+        writeln!(w, "  session  {s}")?;
+    }
+    if let Some(sub) = &e.harness_subagent {
+        writeln!(
+            w,
+            "  subagent {sub} — the event names its own transcript: this is the keyed tier"
+        )?;
+    }
+    if let Some(b) = &e.branch {
+        writeln!(w, "  branch   {b}")?;
+    }
+    Ok(())
 }
 
 /// The bead id `detail` opens with, if it opens with one.
@@ -135,7 +188,7 @@ mod tests {
         std::fs::write(
             ledger(dir.path()),
             concat!(
-                r#"{"at":"2026-08-19T07:13:57.829764529+00:00","agent":"skeleton","kind":"acquired","path":"src/cmd/explain.rs","detail":"recount-hwk.23: the declared seam","invoked_from":"skeleton","chain_hash":"7f5c"}"#,
+                r#"{"at":"2026-08-19T07:13:57.829764529+00:00","agent":"skeleton","kind":"acquired","path":"src/cmd/explain.rs","detail":"recount-hwk.23: the declared seam","invoked_from":"skeleton","chain_hash":"7f5c","pact_version":"0.11.0","harness":"claude-code","model":"claude-opus-5","harness_session":"cd7c75eb-c39f-4be4-92ae-29efda5d7d69","harness_subagent":"a1ded78ef5b657fa6","branch":"wt/skeleton"}"#,
                 "\n",
                 "{ not json at all\n",
                 r#"{"at":"2026-08-19T08:15:20Z","agent":"integration","detail":"merging wt/ci into master","invoked_from":"integration"}"#,
@@ -156,9 +209,14 @@ mod tests {
 
     /// The whole command, on a repo with a ledger and no sessions at all: the
     /// event resolves, `at` runs, and its verdict — a reasoned refusal here —
-    /// comes back as this command's exit code. `at` prints to the process's own
-    /// stdout, which the harness does not capture; the few lines in `cargo
-    /// test`'s output are this command working.
+    /// comes back as this command's exit code. Line 1 is a 0.11.0 row, so the
+    /// tier that refuses is the keyed one, and it refuses because the named
+    /// transcript is not on this disk — a different sentence from "no cwd
+    /// match", and the one that proves the chain was passed. Exit code is the
+    /// same either way, which is the point: the chain changes the *reason*, and
+    /// on a machine that has the transcript it changes the answer. `at` prints
+    /// to the process's own stdout, which the harness does not capture; the few
+    /// lines in `cargo test`'s output are this command working.
     #[test]
     fn a_valid_event_line_produces_ats_outcome() {
         let dir = fixture();
@@ -192,6 +250,45 @@ mod tests {
         assert!(s.contains("worktree `skeleton`"), "{s}");
         assert!(s.contains("src/cmd/explain.rs"), "{s}");
         assert!(s.contains("recount-hwk.23"), "{s}");
+    }
+
+    /// The chain the event declared, in `explain`'s own header — and the marker
+    /// on the model, which is the difference between "this is what was asked
+    /// for" and "this is what answered".
+    #[test]
+    fn the_chain_is_in_the_header_and_the_model_is_marked_declared() {
+        let dir = fixture();
+        let e = finding(&ledger(dir.path()), 1).unwrap();
+        assert_eq!(e.harness_subagent.as_deref(), Some("a1ded78ef5b657fa6"));
+
+        let mut w = Vec::new();
+        context(&e, &ledger(dir.path()), &mut w).unwrap();
+        let s = String::from_utf8(w).unwrap();
+        assert!(s.contains("harness  claude-code"), "{s}");
+        assert!(s.contains("model    claude-opus-5 (declared)"), "{s}");
+        assert!(
+            s.contains("session  cd7c75eb-c39f-4be4-92ae-29efda5d7d69"),
+            "{s}"
+        );
+        assert!(s.contains("subagent a1ded78ef5b657fa6"), "{s}");
+        assert!(s.contains("keyed tier"), "{s}");
+        assert!(s.contains("branch   wt/skeleton"), "{s}");
+    }
+
+    /// A pre-0.11.0 row — line 3 — prints no chain at all rather than five
+    /// `none`s. An older ledger is not a damaged one.
+    #[test]
+    fn a_row_without_a_chain_prints_no_chain() {
+        let dir = fixture();
+        let e = finding(&ledger(dir.path()), 3).unwrap();
+        let mut w = Vec::new();
+        context(&e, &ledger(dir.path()), &mut w).unwrap();
+        let s = String::from_utf8(w).unwrap();
+        for line in ["harness", "model", "session", "subagent", "branch"] {
+            assert!(!s.contains(line), "{line} named on a pre-0.11.0 row: {s}");
+        }
+        // ... and what it does carry is still there.
+        assert!(s.contains("agent `integration`"), "{s}");
     }
 
     #[test]
