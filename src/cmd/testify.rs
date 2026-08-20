@@ -242,14 +242,24 @@ fn annotate(
         };
         let window = TimeWindow::around(ts, args.window);
         let t = match join::resolve(&query, worktrees, sessions, turns) {
-            Ok(m) if m.tier.clears(CONFIDENT) => {
+            Ok(m) if m.confident() => {
                 testified += 1;
                 Testimony::matched(&raw, &agent, ts, &window, m)
             }
             Ok(m) => {
+                // Two ways to miss the bar, and an auditor reading this list
+                // has to be able to tell them apart: a score that fell short,
+                // or a chain that could not discriminate at all — in which
+                // case the score did not fall short and is not the reason.
                 untestified.push(format!(
-                    "{where_} agent `{agent}` at {} — below the bar: tier {} ({})",
+                    "{where_} agent `{agent}` at {} — {}: tier {} ({})",
                     stamp(ts),
+                    if m.lead {
+                        "a LEAD, not an answer — the chain did not discriminate, so no \
+                         score it reaches is confident"
+                    } else {
+                        "below the bar"
+                    },
                     m.tier,
                     m.session.path.display()
                 ));
@@ -431,6 +441,10 @@ struct Testified {
     #[serde(flatten)]
     tier: Tier,
     confident: bool,
+    /// The chain filtered but did not discriminate, so the transcript mention
+    /// decided: a LEAD, never `confident`, whatever `confidence` reads. See
+    /// `join::Match::lead`.
+    lead: bool,
     evidence: Vec<Evidence>,
     /// The window the transcript was cut to: `ts ± --window`.
     window: TimeWindow,
@@ -507,6 +521,7 @@ impl Testimony {
             session: m.session,
             tier: m.tier,
             confident: true,
+            lead: m.lead,
             evidence: m.evidence,
             window: *window,
             transcript: m.in_window,
@@ -531,6 +546,7 @@ impl Testimony {
             session: m.session,
             tier: m.tier,
             confident: false,
+            lead: m.lead,
             evidence: m.evidence,
             window: *window,
             transcript: Vec::new(),
@@ -1017,6 +1033,10 @@ mod tests {
 
     /// Below the bar is not a match: exit 1, the candidate is shown with its
     /// evidence, and the transcript is withheld.
+    ///
+    /// It is also a LEAD, and the line says so rather than blaming the number:
+    /// with topology unable to discriminate, no score this candidate could
+    /// have reached would have been confident.
     #[test]
     fn a_below_threshold_candidate_is_untestified_and_keeps_its_transcript_back() {
         // A session at the repo root that never names the agent: topology B.
@@ -1038,8 +1058,9 @@ mod tests {
             !d.evidence.is_empty(),
             "the evidence is the answer to why not"
         );
+        assert!(d.lead, "the chain did not discriminate");
         assert!(
-            r.untestified[0].contains("below the bar"),
+            r.untestified[0].contains("a LEAD, not an answer"),
             "{}",
             r.untestified[0]
         );

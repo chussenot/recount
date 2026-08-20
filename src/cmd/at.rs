@@ -287,9 +287,16 @@ struct Best {
     tier: Tier,
     /// Never empty — [`join::Match`] cannot be built without it.
     evidence: Vec<Evidence>,
-    /// `confidence >= CONFIDENT`. Duplicated from the comparison so a reader of
-    /// the JSON never has to know the threshold to know the verdict.
+    /// `join::Match::confident()`. Duplicated from the comparison so a reader
+    /// of the JSON never has to know the threshold — or the lead rule — to
+    /// know the verdict.
     confident: bool,
+    /// The chain filtered but did not discriminate, so the transcript mention
+    /// decided and this answer is a LEAD: never `confident`, whatever
+    /// `confidence` says. A separate field because the two are separate facts
+    /// — a 0.40 that nothing spoke for and a 0.65 that a mention picked out
+    /// are both un-confident, and only the second is a lead worth following.
+    lead: bool,
     /// Turns inside the queried window. Empty unless `confident`.
     transcript: Vec<Turn>,
 }
@@ -499,7 +506,7 @@ fn answer(
     let window = TimeWindow::around(query.at, query.window);
     let (outcome, best, refusal) = match join::resolve(query, worktrees, sessions, turns) {
         Ok(m) => {
-            let confident = m.tier.clears(CONFIDENT);
+            let confident = m.confident();
             (
                 if confident {
                     Outcome::Match
@@ -555,6 +562,7 @@ fn best(m: Match, confident: bool) -> Best {
         tier: m.tier,
         evidence: m.evidence,
         confident,
+        lead: m.lead,
         // Withheld below the bar on purpose — see the module doc. The join
         // found these turns either way; what changes is whether the evidence
         // justifies reading them as testimony.
@@ -628,10 +636,13 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
             },
             b.session.path.display()
         )?;
-        let verdict = if b.confident {
-            "CONFIDENT"
-        } else {
-            "NOT CONFIDENT"
+        // Three words, not two: a lead is not confident for a different reason
+        // than a low score is, and the reader has to be able to tell which
+        // without doing arithmetic on the number beside it.
+        let verdict = match (b.confident, b.lead) {
+            (true, _) => "CONFIDENT",
+            (false, true) => "LEAD — NOT CONFIDENT",
+            (false, false) => "NOT CONFIDENT",
         };
         // Which tier answered, in the word it serialises as. A keyed answer has
         // no number and no threshold to clear, and printing "confidence keyed ·
@@ -659,6 +670,17 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
 
     match r.outcome {
         Outcome::Match => transcript(r, w)?,
+        Outcome::LowConfidence if r.best.as_ref().is_some_and(|b| b.lead) => writeln!(
+            w,
+            "\n  no confident match — but NOT for either of the spec's two reasons, and \
+             NOT\n  because the score fell short: both gates passed and the score is \
+             printed above.\n  The chain could not tell this session from its siblings, so \
+             nothing structural\n  picked it out; the topology line above says what did, \
+             and how well that has\n  held up. That makes this a LEAD — somewhere to look, \
+             not the answer. The\n  transcript window is withheld: it would read as \
+             testimony the evidence does not\n  support. The path is printed if you decide \
+             otherwise."
+        )?,
         Outcome::LowConfidence => writeln!(
             w,
             "\n  no confident match — but NOT for either of the spec's two reasons: both \
@@ -1397,6 +1419,24 @@ mod tests {
         fs::create_dir(&repo).unwrap();
         git(&repo, &["init", "-q"]);
         git(&repo, &["commit", "-q", "--allow-empty", "-m", "root"]);
+        // Topology A, and it has to be a real worktree for the real `git
+        // worktree list` to name it: the session's cwd IS `wt/cmdat`, so the
+        // chain singles it out. A cwd at the repo ROOT would not — the root is
+        // shared by every agent that is not in a worktree, so it names no one
+        // and the answer would be a lead however few sessions sit there
+        // (`join::Topology::SharedRoot`).
+        let wt = repo.join("wt").join("cmdat");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "wt/cmdat",
+                &wt.display().to_string(),
+            ],
+        );
 
         // The directory `$HOME/.claude/projects` would hold for this repo,
         // named by the real encoder rather than by hand.
@@ -1405,7 +1445,7 @@ mod tests {
         let line = |at: &str, text: &str| {
             format!(
                 r#"{{"type":"assistant","timestamp":"{at}","cwd":"{}","message":{{"role":"assistant","model":"claude-opus-5","content":[{{"type":"text","text":{text:?}}}]}}}}"#,
-                repo.display()
+                wt.display()
             )
         };
         fs::write(
@@ -1450,9 +1490,11 @@ mod tests {
         assert_eq!(hit.exit_code(), EXIT_OK);
         assert_eq!(hit.considered, 1);
         let b = hit.best.as_ref().unwrap();
-        // Topology unnamed — no worktree is called `cmdat` — plus overlap plus
-        // the mention the transcript makes: 0.2 + 0.2 + 0.25.
-        assert_eq!(score(b), 0.65);
+        // Topology A — the worktree `cmdat` is named after the agent and the
+        // session's cwd is exactly it — plus overlap plus the mention the
+        // transcript makes: 0.5 + 0.2 + 0.25.
+        assert_eq!(score(b), 0.95);
+        assert!(!b.lead, "the chain discriminated, so this is not a lead");
         // Only the two turns inside ±5m; the 11:00 one is out.
         assert_eq!(b.transcript.len(), 2, "{:?}", b.transcript);
         let text = text_of(&hit);
@@ -1460,7 +1502,7 @@ mod tests {
         assert!(text.contains("CONFIDENT"), "{text}");
         // Which tier answered, in the word `Tier::name` serialises as.
         assert!(
-            text.contains("tier topological · confidence 0.65"),
+            text.contains("tier topological · confidence 0.95"),
             "{text}"
         );
         // And the comparison, end to end: a real transcript with a real

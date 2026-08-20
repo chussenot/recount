@@ -5,7 +5,8 @@ this moment, and how sure are we?* It is implemented in `src/join.rs`, whose
 module doc carries the same reasoning next to the arithmetic.
 
 Everything below was checked against the code, or measured on this repository
-on 2026-08-19 at `457a254` and on 2026-08-20 at `6c412a7`. Where a number is a
+on 2026-08-19 at `457a254`, and on 2026-08-20 at `6c412a7` and again after the
+lead rule landed. Where a number is a
 measurement, its conditions are stated with it; re-measure before quoting one,
 because the ledger and the corpus both grow and the worktrees a fleet leaves
 behind get deleted.
@@ -191,11 +192,14 @@ Three signals, in precedence order:
    overlap signal and then print "no single turn falls inside it" two lines
    below it, on a session that had been parked through the whole window
    (`session-learnings.md` §6).
-3. **Transcript mention — the tiebreaker.** The `PACT_AGENT` name or a bead id
-   appearing in the transcript separates sessions that already passed 1 and 2.
-   It never creates a match on its own: an agent discussing `skeleton` is not
-   `skeleton`, and a session the chain excluded is never scored however often
-   it says the name.
+3. **Transcript mention — the tiebreaker, and only a tiebreaker.** The
+   `PACT_AGENT` name or a bead id appearing in the transcript separates
+   sessions that already passed 1 and 2. It never creates a match on its own:
+   an agent discussing `skeleton` is not `skeleton`, and a session the chain
+   excluded is never scored however often it says the name. Nor does it ever
+   *decide* one: an answer the mention picked out, with topology unable to
+   separate the candidates, is a **lead** and is never confident whatever it
+   scores.
 
 ## The two fleet topologies
 
@@ -247,43 +251,97 @@ means nothing. The constants live in `src/join.rs`
 (`TOPOLOGY_DISCRIMINATING`, `TOPOLOGY_FILTER`, `OVERLAP`, `MENTION`), and the
 threshold is the single `CONFIDENT` constant in the same file.
 
-| outcome | confidence |
-|---|---:|
-| chain singled the session out, + mention (topology A) | 0.95 |
-| chain singled it out, no mention (topology A) | 0.70 |
-| chain only filtered, + mention (topology B ceiling) | 0.65 |
-| chain only filtered, no mention (topology B alone) | 0.40 |
+| outcome | confidence | verdict |
+|---|---:|---|
+| chain singled the session out, + mention (topology A) | 0.95 | answer |
+| chain singled it out, no mention (topology A) | 0.70 | answer |
+| chain only filtered, + mention | 0.65 | **lead** |
+| chain only filtered, no mention | 0.40 | **lead** |
 
 Read it as three statements:
 
 - Topology A clears the bar **on topology alone** (0.70). No transcript
   wordplay is needed for an answer that stands.
-- 0.65 is the **ceiling** under topology B, and reaching it requires the
-  mention. It clears the bar but is visibly not 0.70: a mention is testimony,
-  not topology.
-- 0.40 is **deliberately below** `CONFIDENT`. Under topology B a repo-level cwd
-  plus a turn in the window is true of every agent in the fleet, and answering from
-  it would be a confident conclusion drawn from a feature that cannot
-  discriminate — the arkanoid-v1 misdiagnosis this tool exists to prevent. So
-  "filtered but did not discriminate, and nothing else spoke" is a refusal, not
-  a guess.
+- 0.65 is the **ceiling** when the chain only filtered, and reaching it requires
+  the mention. It is a lead, not an answer — see below.
+- 0.40 is the same regime with nothing speaking for it at all, and it was
+  always below `CONFIDENT`.
 
-`at` applies the threshold; `join::resolve` does not. A below-bar candidate is
-still *printed*, with its evidence and without its transcript, because the
-evidence is what tells the auditor whether to look at the clock or at the
-topology. See [cli.md](cli.md) for what each outcome prints and exits.
+### A mention-decided answer is a lead, and the tool says so
+
+**Since 2026-08-20, the bottom two rows are never confident, whatever they
+score.** This is a second, structural bar beside `CONFIDENT`, and it is
+deliberately not a number: `Match::lead` is set whenever topology filtered
+without discriminating, and `Match::confident()` — the one verdict `at` and
+`testify` are allowed to ask for — is `!lead && tier.clears(CONFIDENT)`.
+
+The reason is measured rather than argued. The 0.65 rung was checked against
+the identity each matched transcript declares in its own first turn, over four
+repositories, and got 4 right out of 24
+([session-learnings.md](session-learnings.md) §6). Re-checked on 2026-08-20 over
+the `stale-holds` findings of the same four ledgers, on the 13 distinct
+(agent → matched session) pairs recount then called CONFIDENT: **1 correct, 9
+wrong, 3 unverifiable** (the unverifiable three matched human-driven sessions
+whose opening turns declare no identity). The tiebreaker cannot be repaired
+either, and that was measured too: restricting the mention to turns inside the
+window leaves the distribution bit-identical, because an orchestrator session
+says "orchestrator" in every ten-minute stretch of itself.
+
+Raising `CONFIDENT` to 0.7 would have reached the same findings, but it would
+also have moved every other rung and changed what the word "confident" means
+for answers nobody had complained about. The lead rule says the one thing that
+is actually meant: *a signal that is true of every candidate cannot cast a
+deciding vote, and no score reachable without a discriminating chain is an
+answer.*
+
+**The ladder is untouched and the score is still printed.** 0.65 is still
+computed, still serialised, still in the digest beside `threshold 0.50`; what
+changed is the verdict next to it, which now reads `LEAD — NOT CONFIDENT`, and
+the topology evidence line, which says in words why. A reader must never have
+to infer "this is a lead" from the size of a number — that is exactly how a
+ledger of 0.65s came to be read as a ledger of answers.
+
+`at` applies both bars; `join::resolve` applies neither. A below-bar or lead
+candidate is still *printed*, with its evidence and without its transcript,
+because the evidence is what tells the auditor whether to look at the clock or
+at the topology — and a structural refusal (which prints no candidate at all)
+stays a distinct outcome from a candidate that did not clear the bar. See
+[cli.md](cli.md) for what each outcome prints and exits.
+
+Both commands also carry the fact into `--json` as a `lead` boolean beside
+`confident`, so a script never has to parse a sentence or re-derive a rule.
 
 ## How the degeneracy is detected
 
 Not configured, and not inferred from the fleet's shape: counted, from the
 data, after the overlap gate.
 
-Among the surviving candidates, count those whose cwd resolves **exactly** to
-the worktree `invoked_from` named (as opposed to an ancestor of it). That count
-is the whole predicate:
+First, **is the worktree `invoked_from` named the main checkout?** If it is,
+the count below is never taken, because at the repo root the count is not
+evidence about the chain — it is evidence about the corpus. Every agent that is
+not in a worktree runs in the main checkout, and every subagent of a parent
+started there records it as its cwd ([format-notes.md](format-notes.md) §4.3),
+so "this session's cwd is the root" is a property of the checkout, not of the
+session. `sessions` has said exactly this for as long as it has had a topology
+signal — *"cwd `<repo>` is the repo root, which every agent of a pact run
+shares (§4.3) — it names no one"* — and so has `grep`. The join now agrees with
+them instead of contradicting them one command over.
+
+That was not a theoretical inconsistency. On pact's own ledger, `invoked_from:
+main` resolved to the root, exactly **one** session in that corpus had its cwd
+there, `exact == 1` fired, and eighteen `stale-holds` findings were awarded
+0.95 and printed `CONFIDENT` — all eighteen landing on the same session, one
+spanning 13 days and 14,129 turns. A predicate whose answer swings on how many
+*other* sessions happen to exist is not a discriminator. A corpus with two
+sessions at the root would have scored the identical evidence lower.
+
+Otherwise, among the surviving candidates, count those whose cwd resolves
+**exactly** to the worktree `invoked_from` named (as opposed to an ancestor of
+it). That count is the rest of the predicate:
 
 - `exact == 1` — the chain singled a session out. Topology A, and the only case
-  where topology discriminates.
+  where topology discriminates. **`exact == 1` at the repo root does not count**:
+  see above.
 - `exact == 0` — no candidate names the worktree; every one matched at the repo
   level. Topology B.
 - `exact > 1` — several name it and the chain cannot separate them. An
@@ -291,13 +349,14 @@ is the whole predicate:
 
 Zero and many are both coin flips, not answers, so both score as a filter
 (0.2) rather than as a discriminator (0.5), and the mention becomes decisive.
-A fourth case exists for completeness: nothing named a worktree at all — no
+A fifth case exists for completeness: nothing named a worktree at all — no
 `invoked_from`, and no worktree named after the agent — where the chain has
 filtered to "sessions in this repo" and says so.
 
 Every answer names the regime it was decided in, in its topology evidence line.
-That sentence is not decoration; on topology B it is the difference between a
-lead and an answer.
+That sentence is not decoration: in every regime but topology A it is followed
+by the words `THIS IS A LEAD, NOT A CONFIDENT ANSWER`, and the answer is not
+confident whatever it scored.
 
 ## The refusals
 
@@ -369,11 +428,14 @@ has the conditions.
 
 ## recount is wrong on this repository's own ledger
 
-**Still true after the keyed tier landed.** These 177 events predate pact
-0.11.0 and carry no attribution chain, so the tier above cannot reach them, and
-`recount-gwx` — the tie broken by filesystem path order — decides them exactly
-as it did before. Re-run on master at `6c412a7` on 2026-08-20, the example
-below returns the same wrong transcript, at the same 0.65, with exit 0. The
+**Still true after the keyed tier landed, and still the wrong transcript.**
+These 177 events predate pact 0.11.0 and carry no attribution chain, so the
+tier above cannot reach them, and `recount-gwx` — the tie broken by filesystem
+path order — decides them exactly as it did before. Re-run on 2026-08-20 after
+the lead rule landed, the example below returns the same wrong transcript at
+the same 0.65 — but now as a **lead**, with `"confident": false`, `"lead":
+true` and exit 1. That is the change: the answer is as wrong as it was and the
+tool no longer stands behind it. The
 ledger has 225 rows on 2026-08-20; rows 178 onward are the ones that carry a
 chain, and this table is not about them.
 
@@ -387,7 +449,12 @@ Sweeping `explain` over every row of `.pact/events.jsonl`
 | match at 0.65 (exit 0) | 56 |
 | match at 0.95 (exit 0) | 3 |
 
-Of the 59 answers, **56 are wrong**, and all 56 are above the confidence bar.
+Of the 59 answers, **56 are wrong**, and all 56 were above the confidence bar.
+Every one of the 59 is `invoked_from: main`, so under the lead rule all 59 are
+now leads at exit 1: the 56 wrong ones no longer claim to be answers, and the
+3 that were right no longer claim more than the chain can support. Losing three
+correct answers to keep 56 wrong ones from printing CONFIDENT is the trade this
+project exists to make.
 
 Every match is for an event the orchestrator recorded (`invoked_from: main`),
 because the orchestrator is the only identity whose worktree still exists. The
@@ -417,7 +484,7 @@ event fields are projected away with `jq`, nothing is edited:
   "evidence": [
     {
       "signal": "topology",
-      "detail": "session cwd /home/chussenot/Documents/recount is worktree `main` — topology A (process-per-agent) but ambiguous: several candidate sessions name the same worktree, so the chain filtered without discriminating and the transcript mention decides"
+      "detail": "session cwd /home/chussenot/Documents/recount is worktree `main` — invoked_from named the MAIN CHECKOUT, which every agent not in a worktree shares … a cwd at the repo root names no one, however many sessions happen to sit there, so the chain filtered without discriminating and the transcript mention decides. THIS IS A LEAD, NOT A CONFIDENT ANSWER: …"
     },
     {
       "signal": "time_overlap",
@@ -438,7 +505,9 @@ event fields are projected away with `jq`, nothing is edited:
 The event is the orchestrator taking the merge lock to merge `wt/connector`.
 The transcript returned is `agent-a0b9643f93682445f.jsonl`, whose sidecar
 describes it as *"W2 join engine bead"* — the `join` agent, a different agent
-doing different work. Exit 0, printed as CONFIDENT.
+doing different work. Until 2026-08-20 that was exit 0, printed as CONFIDENT;
+it is now exit 1, printed as `LEAD — NOT CONFIDENT`, with the same 0.65 and the
+same evidence.
 
 **Its own output says so.** The topology line says "filtered without
 discriminating … the transcript mention decides". The mention it decided on is
@@ -449,8 +518,39 @@ deciding vote.
 
 That is the point of the evidence block, and the reason `Match` cannot be
 constructed without a `Tier` and a non-empty `Vec<Evidence>`. The bare
-answer misleads. The answer plus its evidence does not. Read every 0.65 in this
-ledger as a lead, not an answer.
+answer misleads. The answer plus its evidence does not. This page used to end
+the paragraph with *"read every 0.65 in this ledger as a lead, not an answer"*,
+and leave the reader to do it. The tool says it now.
+
+## What the lead rule cost, measured on four ledgers
+
+`pact audit --check stale-holds --json | recount testify --repo <r>`, on
+2026-08-20, immediately before and after the change. Same audit documents, same
+corpora, same window.
+
+| repo | findings | testified before | testified after | leads after | refused |
+|---|---:|---:|---:|---:|---:|
+| pact | 45 | 45 (18 × 0.95, 27 × 0.65) | **0** | 45 × 0.65 | 0 |
+| quern | 3 | 3 (3 × 0.65) | **0** | 3 × 0.65 | 0 |
+| millrace | 8 | 0 | 0 | 0 | 8 `no overlap` |
+| arkanoid | 1 | 0 | 0 | 0 | 1 `no cwd match` |
+
+Forty-eight confident answers became forty-eight leads, and no refusal changed:
+every candidate is still found, still scored, still printed with its evidence.
+The eighteen at 0.95 became 0.65 — the repo root no longer discriminates — and
+then stopped being confident, because a mention decided them.
+
+**That drop is the result, not a regression.** Of the 13 distinct
+(agent → matched session) pairs behind those 48, checked against the identity
+each matched transcript declares in its own first turn: **1 correct, 9 wrong,
+3 unverifiable**. The tool was wrong nine times out of ten where it could be
+checked, and said `CONFIDENT` every time.
+
+The keyed tier is untouched by all of this, and was verified so:
+`explain --event-line 207` (subagent-keyed) and `--event-line 216`
+(parent-keyed) on this repo produce byte-identical output before and after. The
+keyed tier never consulted the ladder, has no candidate set and no tie for a
+mention to break, so `lead` is `false` on it by construction.
 
 [worked-example.md](worked-example.md) replays one such case end to end, with
 the full terminal output and with the refusals analysed. Its distribution

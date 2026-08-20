@@ -184,9 +184,17 @@ fn the_keyed_tier_overrules_the_ladder() {
         "a keyed answer scores nothing, so it has one line of evidence"
     );
 
-    // ... and the ladder, on the same question, prefers the OTHER file.
+    // ... and the ladder, on the same question, prefers the OTHER file — and
+    // says so as a LEAD and exit 1, because the chain could not tell the two
+    // candidates apart and the transcript mention is what picked this one.
+    // That contrast is the whole argument for the keyed tier: same question,
+    // an identity above and a lead below.
     let ladder = explain(&f, 4);
-    assert_eq!(ladder.code, 0, "stderr:\n{}", ladder.stderr);
+    assert_eq!(
+        ladder.code, 1,
+        "a lead is not a match: stderr:\n{}",
+        ladder.stderr
+    );
     let doc = ladder.json();
     assert_eq!(doc["best"]["tier"], "topological");
     assert_eq!(
@@ -196,7 +204,15 @@ fn the_keyed_tier_overrules_the_ladder() {
     );
     assert_eq!(
         doc["best"]["confidence"], 0.65,
-        "0.2 ambiguous topology + 0.2 overlap + 0.25 mention"
+        "0.2 ambiguous topology + 0.2 overlap + 0.25 mention — the score is still \
+         computed and still printed"
+    );
+    assert_eq!(doc["best"]["lead"], true);
+    assert_eq!(doc["best"]["confident"], false);
+    assert!(
+        evidence(&doc, "topology").contains("THIS IS A LEAD, NOT A CONFIDENT ANSWER"),
+        "the reader is told in words, not left to infer it from 0.65: {}",
+        evidence(&doc, "topology")
     );
 }
 
@@ -294,12 +310,15 @@ fn a_pre_contract_row_falls_through_saying_it_is_old_not_defective() {
     let f = tree("keyed-subagent.jsonl");
 
     let run = explain(&f, 4);
-    assert_eq!(run.code, 0, "stderr:\n{}", run.stderr);
+    // Exit 1, and not for a missing chain: the row reaches the ladder, the
+    // ladder answers, and the answer is a lead. The candidate and its evidence
+    // are printed either way, which is what the rest of this test reads.
+    assert_eq!(run.code, 1, "stderr:\n{}", run.stderr);
     let doc = run.json();
     assert_eq!(doc["best"]["tier"], "topological");
     assert!(
         doc["best"]["confidence"].as_f64().is_some(),
-        "an inferred answer carries its number: {doc}"
+        "an inferred answer carries its number, lead or not: {doc}"
     );
 
     let why = evidence(&doc, "keyed");
