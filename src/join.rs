@@ -48,10 +48,18 @@
 //! # Three signals, in precedence order
 //!
 //! 1. **Topology** — the chain above. Without it there is no match to score.
-//! 2. **Time overlap** — REQUIRED, not weighted. A session whose turns do not
-//!    overlap the event window is not a weak match, it is not a match: it
-//!    cannot have produced the event. No overlap short-circuits to
-//!    [`Refusal::NoOverlap`] before any score is computed.
+//! 2. **Time overlap** — REQUIRED, not weighted, and measured on TURNS. A
+//!    session whose turns do not fall inside the event window is not a weak
+//!    match, it is not a match: it cannot have produced the event. No overlap
+//!    short-circuits to [`Refusal::NoOverlap`] before any score is computed.
+//!
+//!    The primitive is the turn, not the span. A session's
+//!    `first_ts..last_ts` straddling the window is NOT overlap: a thirteen-day
+//!    session straddles every window anyone will ever query, and awarding the
+//!    signal for it hands 0.20 — and with it the bar — to every long-running
+//!    session in the repo for every moment in it. The gate is
+//!    [`Match::in_window`], the turns actually inside, and it is non-empty on
+//!    every topological answer by construction.
 //! 3. **Transcript mention** — the tiebreaker. The PACT_AGENT name or a bead
 //!    id appearing in the transcript raises confidence between sessions that
 //!    already passed 1 and 2. It never creates a match on its own: an agent
@@ -138,6 +146,20 @@ pub struct Match {
     pub tier: Tier,
     /// Never empty. See the module doc.
     pub evidence: Vec<Evidence>,
+    /// The matched session's turns INSIDE the query window — the overlap
+    /// signal's own evidence, computed once, here, and handed to whoever
+    /// prints it.
+    ///
+    /// **This field is why the scorer and the renderers cannot drift apart.**
+    /// `at` and `testify` used to re-derive "the turns in the window" from the
+    /// transcript themselves, which is how the tool came to award a time
+    /// overlap and then print "no single turn falls inside it" two lines
+    /// below: two conditions, two code paths, one of them wrong. There is now
+    /// one condition and one path. On a [`Tier::Topological`] answer this is
+    /// non-empty *by construction* — it IS the gate ([`topological`]) — so a
+    /// renderer that finds it empty is looking at a keyed answer, which never
+    /// consulted the clock and does not depend on it.
+    pub in_window: Vec<Turn>,
 }
 
 /// The reasons `at` is allowed to give for exit 1. One per question the reader
@@ -271,6 +293,16 @@ impl Topology {
     }
 }
 
+/// A candidate that cleared BOTH gates, carrying everything its one transcript
+/// read produced: the turns inside the window (which is what clearing the
+/// overlap gate means, and what the digest prints) and the mention, if the
+/// tiebreaker found one.
+struct Survivor<'a> {
+    c: Candidate<'a>,
+    in_window: Vec<Turn>,
+    mention: Option<String>,
+}
+
 /// One session that survived the chain, and how well it survived it.
 struct Candidate<'a> {
     session: &'a SessionMeta,
@@ -301,24 +333,48 @@ struct Candidate<'a> {
 /// nothing to key by, are untouched by this, and still reach the ladder with
 /// the path-order tie-break `gwx` is about waiting for them.
 ///
-/// `turns` reads a session's transcript for the mention tiebreaker. It is a
-/// callback so the join does not decide which connector owns a path and so
-/// transcripts are read lazily — most candidates are eliminated by topology or
-/// overlap without ever being opened. The keyed tier never calls it: nothing in
-/// a transcript could raise an identity.
+/// `turns` reads a session's transcript. It is a callback so the join does not
+/// decide which connector owns a path, and so transcripts are read lazily —
+/// most candidates are eliminated by topology, or by a span that cannot hold a
+/// turn in the window, without ever being opened. One read now serves three
+/// purposes for a candidate that survives: the overlap gate, the mention
+/// tiebreaker, and [`Match::in_window`] for whoever prints the answer.
+///
+/// The keyed tier reads only the WINNER's transcript, and only to fill
+/// [`Match::in_window`] — the read `at` and `testify` were each doing
+/// themselves a moment later. Nothing in a transcript can raise or lower an
+/// identity; the keyed tier still has no gate, no score and no tie to break.
 pub fn resolve(
     query: &Query,
     worktrees: &[Worktree],
     sessions: &[SessionMeta],
     turns: &dyn Fn(&Path) -> Vec<Turn>,
 ) -> Result<Match, Refusal> {
+    let window = TimeWindow::around(query.at, query.window);
+    let keyed_in_window = |m: Match| {
+        let in_window = inside(&window, &turns(&m.session.path));
+        Match { in_window, ..m }
+    };
     match (query.harness_subagent, query.harness_session) {
         // A subagent id wins where both are present: it names the narrower
         // file, and the parent session is not who wrote the event.
-        (Some(subagent), _) => keyed(query, Some(subagent), worktrees, sessions),
-        (None, Some(_)) => keyed(query, None, worktrees, sessions),
-        (None, None) => topological(query, worktrees, sessions, turns),
+        (Some(subagent), _) => {
+            keyed(query, Some(subagent), worktrees, sessions).map(keyed_in_window)
+        }
+        (None, Some(_)) => keyed(query, None, worktrees, sessions).map(keyed_in_window),
+        (None, None) => topological(query, worktrees, sessions, turns, &window),
     }
+}
+
+/// The one definition of "inside the window" in the codebase. Everything that
+/// asks the question — the overlap gate, the keyed answer's transcript, both
+/// digests — asks it here.
+fn inside(window: &TimeWindow, turns: &[Turn]) -> Vec<Turn> {
+    turns
+        .iter()
+        .filter(|t| window.contains(t.ts))
+        .cloned()
+        .collect()
 }
 
 /// The keyed tier: the event names the transcript, so resolution is a path
@@ -452,6 +508,10 @@ fn keyed_match(
         session: meta.clone(),
         tier: Tier::Keyed,
         evidence: vec![Evidence::new(Signal::Keyed, detail)],
+        // Filled by `resolve`, which owns the window and the reader. A keyed
+        // identity does not depend on it: it is what the session was SAYING
+        // around the moment, not what proves it was this session.
+        in_window: Vec::new(),
     })
 }
 
@@ -494,6 +554,7 @@ fn topological(
     worktrees: &[Worktree],
     sessions: &[SessionMeta],
     turns: &dyn Fn(&Path) -> Vec<Turn>,
+    window: &TimeWindow,
 ) -> Result<Match, Refusal> {
     // 1. invoked_from -> worktree.
     let (named, chain) = name_worktree(query, worktrees)?;
@@ -536,27 +597,65 @@ fn topological(
         });
     }
 
-    // 3. Time overlap, the one hard gate. A session with no timestamp at all
-    //    (an empty or wholly unparseable file) cannot be shown to overlap, so
-    //    it does not: unbounded here would mean "always", which is the opposite
-    //    of what an absent clock tells us.
-    let window = TimeWindow::around(query.at, query.window);
-    let (overlapping, missed): (Vec<_>, Vec<_>) = candidates.into_iter().partition(|c| {
-        let w = c.session.window();
-        !w.is_unbounded() && w.overlaps(&window)
-    });
+    // 3. Time overlap, the one hard gate, and it is a gate on TURNS. A span
+    //    that straddles the window proves nothing — a session that ran for
+    //    thirteen days straddles every window there is — so the question asked
+    //    of each candidate is whether any of its turns is actually inside.
+    //    A session with no timestamp at all (an empty or wholly unparseable
+    //    file) has no turn anywhere and so has none here: unbounded would mean
+    //    "always", the opposite of what an absent clock tells us.
+    //
+    //    The span is still consulted, as a cheap NECESSARY condition: every
+    //    turn lies within `first_ts..last_ts` by construction, so a span that
+    //    misses the window cannot hold a turn inside it and that file is never
+    //    opened. That is an optimisation on the read, not a second definition
+    //    of overlap — the decision below is the turn list in both branches.
+    let mut overlapping: Vec<Survivor> = Vec::new();
+    let mut missed: Vec<(Candidate, bool)> = Vec::new();
+    for c in candidates {
+        let span = c.session.window();
+        let could = !span.is_unbounded() && span.overlaps(window);
+        let read = if could {
+            turns(&c.session.path)
+        } else {
+            Vec::new()
+        };
+        // One read, three answers: the gate, the tiebreaker, and the turns the
+        // digest prints. The transcript is dropped at the end of this
+        // iteration — only the window's worth of it is kept.
+        let in_window = inside(window, &read);
+        if in_window.is_empty() {
+            missed.push((c, could));
+            continue;
+        }
+        let mention = mention(query, &read);
+        overlapping.push(Survivor {
+            c,
+            in_window,
+            mention,
+        });
+    }
     if overlapping.is_empty() {
         return Err(Refusal::NoOverlap {
             detail: format!(
                 "{} session(s) matched {chain}, but none has a turn in {}: {}",
                 missed.len(),
-                fmt_window(&window),
+                fmt_window(window),
                 missed
                     .iter()
-                    .map(|c| format!(
-                        "{} covers {}",
+                    .map(|(c, straddled)| format!(
+                        "{} covers {}{}",
                         file_name(c.session),
-                        fmt_window(&c.session.window())
+                        fmt_window(&c.session.window()),
+                        // The distinction the auditor needs: a span that
+                        // never reached the window is a different fact from
+                        // one that straddles it and was silent through it,
+                        // and only the first is fixed by widening --window.
+                        if *straddled {
+                            " — its span straddles the window and not one of its turns falls inside it"
+                        } else {
+                            ""
+                        }
                     ))
                     .collect::<Vec<_>>()
                     .join("; ")
@@ -567,7 +666,7 @@ fn topological(
     // 4. Did the chain actually single anyone out? One exact link and the
     //    answer is topological; anything else and topology has only filtered,
     //    whatever the spec's happy path assumes.
-    let exact = overlapping.iter().filter(|c| c.exact).count();
+    let exact = overlapping.iter().filter(|s| s.c.exact).count();
     let topology = match (named, exact) {
         (None, _) => Topology::Unnamed,
         (Some(_), 0) => Topology::SubagentPerAgent,
@@ -590,8 +689,8 @@ fn topological(
     //    parent-keying bought is this run's 13 chained session-only rows, not
     //    gwx's 56. recount-gwx stays open.
     let mut best: Option<(f64, Match)> = None;
-    for c in &overlapping {
-        let (score, scored) = score(query, c, topology, &window, turns);
+    for s in overlapping {
+        let (score, scored) = score(query, s, topology, window);
         if best.as_ref().is_none_or(|(b, _)| score > *b) {
             best = Some((score, scored));
         }
@@ -663,13 +762,12 @@ fn name_worktree<'a>(
 /// One candidate's score and the evidence that produced it. Both come out of
 /// the same loop because a score without its reason is the bare answer the
 /// spec forbids.
-fn score(
-    query: &Query,
-    c: &Candidate,
-    topology: Topology,
-    window: &TimeWindow,
-    turns: &dyn Fn(&Path) -> Vec<Turn>,
-) -> (f64, Match) {
+fn score(query: &Query, s: Survivor, topology: Topology, window: &TimeWindow) -> (f64, Match) {
+    let Survivor {
+        c,
+        in_window,
+        mention,
+    } = s;
     let mut evidence = Vec::new();
     let mut total = 0.0;
 
@@ -697,19 +795,20 @@ fn score(
         format!("{link} — {}", topology.observed()),
     ));
 
+    // The signal, and the count that IS the signal. The span is reported second
+    // and as context only: it is what the old scorer awarded on, it is true of
+    // every long session, and it is not what earned the 0.20 here.
     total += OVERLAP;
     evidence.push(Evidence::new(
         Signal::TimeOverlap,
         format!(
-            "session covers {} and overlaps the queried {}",
+            "{} turn(s) of this session fall inside the queried {} (the session covers {})",
+            in_window.len(),
+            fmt_window(window),
             fmt_window(&c.session.window()),
-            fmt_window(window)
         ),
     ));
 
-    // The transcript is opened only here — after both gates — and only for
-    // candidates that survived them.
-    let mention = mention(query, &turns(&c.session.path));
     match &mention {
         Some(found) => {
             total += MENTION;
@@ -739,6 +838,7 @@ fn score(
             session: c.session.clone(),
             tier: Tier::Topological(Confidence::new(total)),
             evidence,
+            in_window,
         },
     )
 }
@@ -930,8 +1030,11 @@ mod tests {
         }
     }
 
-    /// Transcripts by file stem. Anything not listed reads as an empty file,
-    /// which is how a session with no mention is spelled.
+    /// Transcripts by file stem. Every session gets ONE turn, at the queried
+    /// moment, because the overlap gate is a gate on turns: a fixture with no
+    /// turn in the window is a fixture that refuses, whatever its span says.
+    /// Anything not listed says nothing, which is how a session with no
+    /// mention is spelled.
     fn transcripts(by_stem: &[(&str, &str)]) -> impl Fn(&Path) -> Vec<Turn> {
         let map: HashMap<String, String> = by_stem
             .iter()
@@ -939,22 +1042,37 @@ mod tests {
             .collect();
         move |p: &Path| {
             let stem = p.file_stem().unwrap_or_default().to_string_lossy();
-            map.get(stem.as_ref())
-                .map(|text| {
-                    vec![Turn {
-                        ts: ts("2026-08-19T07:30:00Z"),
-                        role: Role::User,
-                        text: text.clone(),
-                        line: 1,
-                    }]
-                })
-                .unwrap_or_default()
+            vec![turn_at(
+                "2026-08-19T07:30:00Z",
+                map.get(stem.as_ref()).map_or("", String::as_str),
+            )]
         }
     }
 
-    fn none(_: &Path) -> Vec<Turn> {
+    fn turn_at(at: &str, text: &str) -> Turn {
+        Turn {
+            ts: ts(at),
+            role: Role::User,
+            text: text.to_string(),
+            line: 1,
+        }
+    }
+
+    /// A session that is present in the window and names nobody: one turn at
+    /// the queried moment, saying nothing. NOT an empty file — see
+    /// [`no_turns`], which is a different fixture asserting a different thing.
+    fn silent(_: &Path) -> Vec<Turn> {
+        vec![turn_at("2026-08-19T07:30:00Z", "")]
+    }
+
+    /// A file with nothing in it, or nothing this connector could read.
+    fn no_turns(_: &Path) -> Vec<Turn> {
         Vec::new()
     }
+
+    /// What `resolve` takes, named so an array of them is not "a very complex
+    /// type".
+    type Reader = dyn Fn(&Path) -> Vec<Turn>;
 
     /// The score behind a topological answer, for the tests that pin the
     /// arithmetic. Panics on a keyed one — which is the point: there is no
@@ -997,7 +1115,7 @@ mod tests {
             ),
         ];
 
-        let m = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
+        let m = resolve(&query("join", Some("join")), &wts, &sessions, &silent).unwrap();
         assert_eq!(m.session.path, sessions[0].path);
         assert_eq!(score(&m), TOPOLOGY_DISCRIMINATING + OVERLAP);
         assert!(score(&m) >= CONFIDENT);
@@ -1011,6 +1129,125 @@ mod tests {
             .detail
             .contains("topology A (process-per-agent)"));
         assert!(m.evidence[0].detail.contains("is worktree `join`"));
+    }
+
+    /// The bead: a session whose SPAN straddles the window but whose turns are
+    /// all outside it does not overlap. A thirteen-day session straddles every
+    /// window anyone will ever query, and on the old span test it collected
+    /// 0.20 — and with it the bar — for every moment in those thirteen days.
+    ///
+    /// Same fleet, same chain, same span: the only thing that moves is whether
+    /// a turn is inside, and it decides between an answer and a refusal.
+    #[test]
+    fn a_span_that_straddles_the_window_is_not_overlap_a_turn_inside_it_is() {
+        let wts = fleet(&["join"]);
+        // 07:00..08:00 straddles the queried 07:25..07:35 completely.
+        let sessions = vec![session(
+            "long",
+            Some("/r/wt/join"),
+            "2026-08-19T07:00:00Z",
+            "2026-08-19T08:00:00Z",
+        )];
+        let q = query("join", Some("join"));
+
+        // Turns either side of the window and none in it: not a weak match, a
+        // refusal, and the reason says which of the two shapes it is so the
+        // reader is not sent to widen a window that is already wide enough.
+        let parked = |_: &Path| {
+            vec![
+                turn_at("2026-08-19T07:05:00Z", "before"),
+                turn_at("2026-08-19T07:55:00Z", "after"),
+            ]
+        };
+        let err = resolve(&q, &wts, &sessions, &parked).unwrap_err();
+        assert_eq!(err.reason(), "no overlap", "{}", err.detail());
+        assert!(
+            err.detail().contains("straddles the window"),
+            "{}",
+            err.detail()
+        );
+
+        // A file with nothing in it is the same answer for the same reason.
+        assert_eq!(
+            resolve(&q, &wts, &sessions, &no_turns)
+                .unwrap_err()
+                .reason(),
+            "no overlap"
+        );
+
+        // One turn inside, everything else held: unchanged, and the top rung.
+        let spoke = |_: &Path| {
+            vec![
+                turn_at("2026-08-19T07:05:00Z", "before"),
+                turn_at("2026-08-19T07:30:00Z", "join is working on recount-hwk.31"),
+                turn_at("2026-08-19T07:55:00Z", "after"),
+            ]
+        };
+        let m = resolve(&q, &wts, &sessions, &spoke).unwrap();
+        assert_eq!(
+            score(&m),
+            TOPOLOGY_DISCRIMINATING + OVERLAP + MENTION,
+            "a turn inside scores exactly what it always did"
+        );
+        // The signal is now stated as the count that earned it, and the
+        // in-window turns travel with the answer.
+        assert_eq!(m.in_window.len(), 1);
+        assert_eq!(m.in_window[0].ts, ts("2026-08-19T07:30:00Z"));
+        assert!(
+            m.evidence[1]
+                .detail
+                .starts_with("1 turn(s) of this session"),
+            "{}",
+            m.evidence[1].detail
+        );
+    }
+
+    /// The anti-drift pin, at the layer the bug lived in: the overlap signal
+    /// and the turns a renderer prints are ONE decision, not two conditions
+    /// that agree today. `Match::in_window` is the gate, so it is impossible
+    /// for a scored answer to carry a time-overlap signal and hand a renderer
+    /// nothing to show.
+    #[test]
+    fn a_scored_answer_can_never_award_overlap_with_an_empty_window() {
+        let wts = fleet(&["join", "skeleton"]);
+        let sessions = vec![
+            session(
+                "a",
+                Some("/r/wt/join"),
+                "2026-08-19T07:00:00Z",
+                "2026-08-19T08:00:00Z",
+            ),
+            session(
+                "b",
+                Some("/r"),
+                "2026-08-19T00:00:00Z",
+                "2026-08-19T23:59:00Z",
+            ),
+        ];
+        // Every shape of transcript, including the ones that used to slip
+        // through: silent, empty, all-outside, one-inside, many-inside.
+        let readers: [&Reader; 4] = [
+            &no_turns,
+            &silent,
+            &|_| vec![turn_at("2026-08-19T06:00:00Z", "long before")],
+            &|_| {
+                vec![
+                    turn_at("2026-08-19T07:29:00Z", "in"),
+                    turn_at("2026-08-19T07:31:00Z", "also in"),
+                ]
+            },
+        ];
+        for (i, turns) in readers.iter().enumerate() {
+            let Ok(m) = resolve(&query("join", Some("join")), &wts, &sessions, *turns) else {
+                continue;
+            };
+            let awarded = m.evidence.iter().any(|e| e.signal == Signal::TimeOverlap);
+            assert!(
+                awarded && !m.in_window.is_empty(),
+                "reader {i}: overlap awarded={awarded} but {} turn(s) in the window",
+                m.in_window.len()
+            );
+        }
     }
 
     /// Signal 3 alone, and the amendment's core case: three sessions with one
@@ -1044,7 +1281,7 @@ mod tests {
 
         // Nobody says anything: the chain filtered three sessions and cannot
         // choose. The best score must be below the bar, so `at` refuses.
-        let mute = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
+        let mute = resolve(&query("join", Some("join")), &wts, &sessions, &silent).unwrap();
         assert!(
             score(&mute) < CONFIDENT,
             "topology B answered {} on topology alone — the arkanoid-v1 failure",
@@ -1102,7 +1339,7 @@ mod tests {
             ),
         ];
 
-        let m = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
+        let m = resolve(&query("join", Some("join")), &wts, &sessions, &silent).unwrap();
         assert!(score(&m) < CONFIDENT, "{}", m.tier);
         assert!(m.evidence[0].detail.contains("ambiguous"));
     }
@@ -1118,7 +1355,7 @@ mod tests {
             "2026-08-19T10:00:00Z",
         )];
 
-        let err = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap_err();
+        let err = resolve(&query("join", Some("join")), &wts, &sessions, &silent).unwrap_err();
         assert_eq!(err.reason(), "no overlap");
         assert!(
             err.detail().contains("07:25:00Z..2026-08-19T07:35:00Z"),
@@ -1142,7 +1379,7 @@ mod tests {
         s.first_ts = None;
         s.last_ts = None;
 
-        let err = resolve(&query("join", Some("join")), &wts, &[s], &none).unwrap_err();
+        let err = resolve(&query("join", Some("join")), &wts, &[s], &silent).unwrap_err();
         assert_eq!(err.reason(), "no overlap");
     }
 
@@ -1161,7 +1398,7 @@ mod tests {
             session("b", None, "2026-08-19T07:00:00Z", "2026-08-19T08:00:00Z"),
         ];
 
-        let err = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap_err();
+        let err = resolve(&query("join", Some("join")), &wts, &sessions, &silent).unwrap_err();
         assert_eq!(err.reason(), "no cwd match");
         assert!(
             err.detail().contains("1 resolve elsewhere"),
@@ -1179,7 +1416,7 @@ mod tests {
         )];
         let wts = fleet(&["join", "skeleton"]);
         assert_eq!(
-            resolve(&query("join", Some("join")), &wts, &sibling, &none)
+            resolve(&query("join", Some("join")), &wts, &sibling, &silent)
                 .unwrap_err()
                 .reason(),
             "no cwd match"
@@ -1198,7 +1435,7 @@ mod tests {
             "2026-08-19T08:00:00Z",
         )];
 
-        let err = resolve(&query("gone", Some("gone")), &wts, &sessions, &none).unwrap_err();
+        let err = resolve(&query("gone", Some("gone")), &wts, &sessions, &silent).unwrap_err();
         assert_eq!(err.reason(), "no cwd match");
         assert!(err.detail().contains("gone from disk"), "{}", err.detail());
         assert!(err.detail().contains("/r/wt/gone"), "{}", err.detail());
@@ -1217,7 +1454,7 @@ mod tests {
             "2026-08-19T08:00:00Z",
         )];
 
-        let err = resolve(&query("join", Some("ghost")), &wts, &sessions, &none).unwrap_err();
+        let err = resolve(&query("join", Some("ghost")), &wts, &sessions, &silent).unwrap_err();
         assert_eq!(err.reason(), "no cwd match");
         assert!(err.detail().contains("`main`, `join`"), "{}", err.detail());
     }
@@ -1234,12 +1471,12 @@ mod tests {
             "2026-08-19T08:00:00Z",
         )];
 
-        let m = resolve(&query("join", None), &wts, &sessions, &none).unwrap();
+        let m = resolve(&query("join", None), &wts, &sessions, &silent).unwrap();
         assert_eq!(score(&m), TOPOLOGY_DISCRIMINATING + OVERLAP);
 
         // And with no worktree of that name, the chain is repo-wide: it can
         // still filter, never discriminate.
-        let m = resolve(&query("orchestrator", None), &wts, &sessions, &none).unwrap();
+        let m = resolve(&query("orchestrator", None), &wts, &sessions, &silent).unwrap();
         assert!(score(&m) < CONFIDENT);
         assert!(m.evidence[0].detail.contains("topology unnamed"));
     }
@@ -1432,7 +1669,7 @@ mod tests {
         let path = keyed_file(&wts[1], SUB);
         let sessions = vec![session_at(&path, Some("/r"))];
 
-        let m = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &none).unwrap();
+        let m = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &silent).unwrap();
         assert_eq!(m.tier, Tier::Keyed);
         assert_eq!(m.session.path, path);
         assert_eq!(m.tier.confidence(), None, "an identity has no score");
@@ -1469,7 +1706,7 @@ mod tests {
             "2026-08-19T08:00:00Z",
         )];
 
-        let err = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &none).unwrap_err();
+        let err = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &silent).unwrap_err();
         assert_eq!(err.reason(), "no keyed transcript");
         assert_ne!(err.reason(), "no cwd match");
         let d = err.detail();
@@ -1489,7 +1726,7 @@ mod tests {
     fn a_malformed_keyed_id_is_not_an_absent_file() {
         let (_td, wts) = keyed_tree();
 
-        let err = resolve(&keyed_query("join", Some("../etc")), &wts, &[], &none).unwrap_err();
+        let err = resolve(&keyed_query("join", Some("../etc")), &wts, &[], &silent).unwrap_err();
         assert_eq!(err.reason(), "no keyed transcript");
         let d = err.detail();
         assert!(d.contains("harness_subagent"), "{d}");
@@ -1505,7 +1742,7 @@ mod tests {
             harness_subagent: Some(SUB),
             ..query("join", Some("join"))
         };
-        let err = resolve(&half, &wts, &[], &none).unwrap_err();
+        let err = resolve(&half, &wts, &[], &silent).unwrap_err();
         assert_eq!(err.reason(), "no keyed transcript");
         assert!(
             err.detail().contains("harness_session is empty"),
@@ -1537,7 +1774,7 @@ mod tests {
             session_at(&sub, Some("/r")),
         ];
 
-        let m = resolve(&keyed_query("join", None), &wts, &sessions, &none).unwrap();
+        let m = resolve(&keyed_query("join", None), &wts, &sessions, &silent).unwrap();
         assert_eq!(m.tier, Tier::Keyed, "a named file is not a guess");
         assert_eq!(m.session.path, top);
         assert_ne!(m.session.path, sub, "it named the session, not a subagent");
@@ -1573,7 +1810,7 @@ mod tests {
             "2026-08-19T08:00:00Z",
         )];
 
-        let err = resolve(&keyed_query("join", None), &wts, &sessions, &none).unwrap_err();
+        let err = resolve(&keyed_query("join", None), &wts, &sessions, &silent).unwrap_err();
         assert_eq!(err.reason(), "no keyed transcript");
         let d = err.detail();
         assert!(d.contains(&format!("{SESSION}.jsonl")), "{d}");
@@ -1603,7 +1840,7 @@ mod tests {
             "2026-08-19T08:00:00Z",
         )];
 
-        let m = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
+        let m = resolve(&query("join", Some("join")), &wts, &sessions, &silent).unwrap();
         assert_eq!(
             m.tier,
             Tier::Topological(Confidence::new(TOPOLOGY_DISCRIMINATING + OVERLAP))
@@ -1631,7 +1868,7 @@ mod tests {
         let top = top_level_file(&wts[0]);
         let sessions = vec![session_at(&top, Some("/r")), session_at(&sub, Some("/r"))];
 
-        let m = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &none).unwrap();
+        let m = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &silent).unwrap();
         assert_eq!(m.tier, Tier::Keyed);
         assert_eq!(m.session.path, sub);
         let d = &m.evidence[0].detail;
@@ -1699,7 +1936,7 @@ mod tests {
         let (_td, wts) = keyed_tree();
         let path = keyed_file(&wts[0], SUB);
 
-        let err = resolve(&keyed_query("join", Some(SUB)), &wts, &[], &none).unwrap_err();
+        let err = resolve(&keyed_query("join", Some(SUB)), &wts, &[], &silent).unwrap_err();
         assert_eq!(err.reason(), "no keyed transcript");
         assert!(err.detail().contains("IS on disk"), "{}", err.detail());
         assert!(
