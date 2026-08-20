@@ -285,3 +285,109 @@ Section 2 is the honest reading of the gap between 0.65 and 0.70: on topology
 B, a confident match is one weak signal away from a wrong one, and the
 evidence block is the only thing standing between a reader and the arkanoid
 mistake.
+
+## 4. The keyed tier, on this repository, on 2026-08-20
+
+Everything above is v0.1.0's topological ladder, and every number in it is a
+score. v0.2.0 adds a tier above the ladder: when pact stamped the attribution
+chain on the event, the event *names* its own transcript and there is nothing
+to score. Run against the main checkout — the copy inside a worktree is a
+stale git checkout, so `--repo` must point at
+`/home/chussenot/Documents/recount`:
+
+```
+$ recount explain --repo /home/chussenot/Documents/recount --event-line 207
+recount explain — /home/chussenot/Documents/recount/.pact/events.jsonl line 207
+  event    2026-08-19T17:20:53.482236042+00:00 · agent `joinkeyed`
+  from     worktree `joinkeyed` — the join's first link
+  about    src/join.rs
+  detail   recount-1cw.5: the keyed tier above the topological ladder
+  bead     recount-1cw.5 — also looked for in the transcript
+
+recount at — /home/chussenot/Documents/recount
+  agent    `joinkeyed`
+  moment   2026-08-19T17:20:53Z · window ±5m each side → [2026-08-19T17:15:53Z … 2026-08-19T17:25:53Z]
+  scanned  1 session dir(s) · 2 session(s) the window could not rule out
+
+  chain    what pact stamped on the event itself
+    harness           claude-code
+    model             claude-opus-5 (declared — the PACT_MODEL the spawner asked for, which is
+                      an intent, not an observation: it is not evidence that this
+                      model answered)
+    harness_session   cd7c75eb-c39f-4be4-92ae-29efda5d7d69
+    harness_subagent  aaadf026f08b25971
+    branch            wt/joinkeyed
+
+  match           /home/chussenot/.claude/projects/-home-chussenot-Documents-recount/cd7c75eb-c39f-4be4-92ae-29efda5d7d69/subagents/agent-aaadf026f08b25971.jsonl
+    tier keyed · no score, and none is missing: the event named this transcript · CONFIDENT
+      · keyed: the event named its own transcript: harness_subagent `aaadf026f08b25971` under harness_session `cd7c75eb-c39f-4be4-92ae-29efda5d7d69` is agent-aaadf026f08b25971.jsonl, found at /home/chussenot/.claude/projects/-home-chussenot-Documents-recount/cd7c75eb-c39f-4be4-92ae-29efda5d7d69/subagents/agent-aaadf026f08b25971.jsonl by one path join and one stat. No candidate set, no score, no tie to break — this is an identity, and the topological ladder was not consulted
+      · model: declared claude-opus-5, session records claude-opus-5 — they agree
+
+  transcript window — 111 turn(s) in [2026-08-19T17:15:53Z … 2026-08-19T17:25:53Z]
+
+    [2026-08-19T17:16:26Z] user (line 1)
+      You are agent `joinkeyed` in a pact-coordinated fleet building recount v0.2.0. This is the bead the whole release turns on.
+
+      WORKTREE: /home/chussenot/Documents/recount/wt/joinkeyed (branch wt/joinkeyed). `cd` there first; never touch the main checkout or another wt/*.
+      [+5688 more characters — the full text is in --json]
+
+    [2026-08-19T17:16:32Z] assistant (line 7)
+      [tool_use Bash]
+      {"command":"SD=$(ls -d \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"/projects/*/\"$CLAUDE_CODE_SESSION_ID\"/subagents 2>/dev/null | head -1)\nM='PACT-SELFID-joinkeyed-2a71fd'\n…"}
+
+    [2026-08-19T17:16:35Z] user (line 8)
+      [tool_result]
+      PACT_HARNESS_SUBAGENT=aaadf026f08b25971
+
+[… 107 of the 111 turns elided here; the pasted turns are verbatim except
+   the one marked `…` inside the tool_use JSON, and the elision is mine …]
+```
+
+Exit 0. Compare this with §1 and §2. There is no confidence number, because
+there is nothing to be uncertain about: the event carries
+`harness_subagent: aaadf026f08b25971`, that id is a filename under the
+session directory the event also names, and one `stat` either finds it or
+does not. The candidate set was never built. The transcript mention — the
+signal that cast the deciding, wrong vote in §2 — was never consulted.
+
+Note what the chain block does *not* claim. `model claude-opus-5 (declared …
+it is not evidence that this model answered)` is the `PACT_MODEL` the
+spawner asked for. The `model:` evidence line then reports that the session
+file records the same value, which is a corroboration and is printed as one.
+
+**The self-id handshake is the price.** The keyed tier only works because the
+agent's first tool call wrote a literal marker into its own transcript and
+grepped for it — that is line 7 above, and it is why line 8 exists. Nothing
+in Claude Code hands a subagent its own transcript id. The chain is a
+convention the fleet's prompts enforce, not a property of the harness, and
+the moment a prompt drops the handshake the events fall back to the ladder.
+
+## 5. A clean audit, and why that is the interesting case
+
+```
+$ pact audit --json | recount testify --repo .
+recount testify — /home/chussenot/Documents/recount
+  source   stdin
+  input    pact audit summary (no --check)
+  scanned  1 session dir(s) · 46 session(s) · window ±300s each side
+  findings 0 · testified 0 · untestified 0 · passed through 0
+
+  nothing to testify: the audit found nothing. A clean audit is not a failure.
+```
+
+Exit 0. This repository's own coordination history has no double-win, no
+stale hold, no chain break, no merge divergence, no silent contention and no
+retry storm, so there is nothing for `testify` to annotate.
+
+That is the empty-set contract working, not a demonstration that failed to
+happen. The tempting implementations both exit 1 here — one because "no
+findings were testified" reads as failure, one because an empty `findings`
+array trips a "malformed document" guard — and both would put a red line in
+a CI log for a repository whose coordination was clean. `testify` exits 1 for
+exactly one reason: a finding that carried an agent and a moment and still
+got no confident match. Zero findings cannot produce one.
+
+For what `testify` looks like when the audit is *not* clean, see
+[session-learnings.md](session-learnings.md), which runs it against four
+older repositories on this machine — 2,456 ledger rows between them, and not
+one of them keyed.
