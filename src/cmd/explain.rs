@@ -41,6 +41,10 @@
 //! event, and here is the session behind it. Nothing is lost from the machine
 //! document either — `agent`, `ts` and `window` are in it as `at`'s inputs, and
 //! `invoked_from` and the bead id show up in the evidence they earn.
+//!
+//! The attribution chain is `at`'s to print, not this module's: `explain`
+//! *resolves* it — that is the whole point of [`crate::cmd::at::run_with`] —
+//! and then lets `at`'s header be the one place it appears.
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -98,6 +102,13 @@ fn finding(path: &Path, n: usize) -> Result<Event> {
 }
 
 /// The finding, in the words the ledger used, above `at`'s answer.
+///
+/// Only what is `explain`'s own: which ledger line, when, who, the worktree,
+/// the path, the `detail`, and this module's reading of a bead id out of it.
+/// The five chain links the row also carries are deliberately *not* here —
+/// `at`'s own `chain` prints them ten lines below, in full, with a dash
+/// for every link pact could not stamp, and `at` is the command that consumes
+/// them. Printing them twice made the reader diff two renderings of one fact.
 fn context(e: &Event, path: &Path, w: &mut dyn Write) -> io::Result<()> {
     writeln!(w, "recount explain — {} line {}", path.display(), e.line)?;
     writeln!(w, "  event    {} · agent `{}`", e.at.to_rfc3339(), e.agent)?;
@@ -110,48 +121,11 @@ fn context(e: &Event, path: &Path, w: &mut dyn Write) -> io::Result<()> {
     if let Some(d) = &e.detail {
         writeln!(w, "  detail   {d}")?;
     }
-    chain(e, w)?;
     match bead(e) {
         Some(b) => writeln!(w, "  bead     {b} — also looked for in the transcript")?,
         None => writeln!(w, "  bead     none in detail — agent name only")?,
     }
     writeln!(w)
-}
-
-/// The pact 0.11.0 attribution chain, in the words the row used.
-///
-/// Every field is optional and every one is printed only if the row carries it:
-/// a pre-0.11.0 ledger prints none of this and is not a degraded ledger, it is
-/// an older one. Absent fields are silent rather than `none`, unlike the bead
-/// line below — a missing bead means the tiebreaker had nothing to look for,
-/// which changes how you read the evidence, whereas a missing chain just means
-/// the event predates it.
-///
-/// `model` is marked `(declared)` and always will be. pact records what the
-/// spawner asked for in `PACT_MODEL`; whether that is the model that actually
-/// answered is a question only the transcript can settle, and settling it is
-/// `at`'s job, in `at`'s header, against the session it resolved. Printing the
-/// declaration unmarked here would read as an observation.
-fn chain(e: &Event, w: &mut dyn Write) -> io::Result<()> {
-    if let Some(h) = &e.harness {
-        writeln!(w, "  harness  {h}")?;
-    }
-    if let Some(m) = &e.model {
-        writeln!(w, "  model    {m} (declared)")?;
-    }
-    if let Some(s) = &e.harness_session {
-        writeln!(w, "  session  {s}")?;
-    }
-    if let Some(sub) = &e.harness_subagent {
-        writeln!(
-            w,
-            "  subagent {sub} — the event names its own transcript: this is the keyed tier"
-        )?;
-    }
-    if let Some(b) = &e.branch {
-        writeln!(w, "  branch   {b}")?;
-    }
-    Ok(())
 }
 
 /// The bead id `detail` opens with, if it opens with one.
@@ -252,43 +226,28 @@ mod tests {
         assert!(s.contains("recount-hwk.23"), "{s}");
     }
 
-    /// The chain the event declared, in `explain`'s own header — and the marker
-    /// on the model, which is the difference between "this is what was asked
-    /// for" and "this is what answered".
+    /// The chain is `at`'s to print. Both shapes of row — one with all five
+    /// links, one from before pact stamped any — leave `explain`'s block
+    /// naming none of them. This is the regression: `at` prints the fuller
+    /// rendering ten lines below, and two renderings of one fact is worse than
+    /// either alone.
     #[test]
-    fn the_chain_is_in_the_header_and_the_model_is_marked_declared() {
+    fn the_chain_is_never_in_explains_own_block() {
         let dir = fixture();
+        for n in [1, 3] {
+            let e = finding(&ledger(dir.path()), n).unwrap();
+            let mut w = Vec::new();
+            context(&e, &ledger(dir.path()), &mut w).unwrap();
+            let s = String::from_utf8(w).unwrap();
+            for link in ["harness", "model", "session", "subagent", "branch"] {
+                assert!(!s.contains(link), "line {n} names {link}: {s}");
+            }
+        }
+        // Line 1 does carry the whole chain — the point is that `explain` had
+        // it and still left the printing to `at`.
         let e = finding(&ledger(dir.path()), 1).unwrap();
         assert_eq!(e.harness_subagent.as_deref(), Some("a1ded78ef5b657fa6"));
-
-        let mut w = Vec::new();
-        context(&e, &ledger(dir.path()), &mut w).unwrap();
-        let s = String::from_utf8(w).unwrap();
-        assert!(s.contains("harness  claude-code"), "{s}");
-        assert!(s.contains("model    claude-opus-5 (declared)"), "{s}");
-        assert!(
-            s.contains("session  cd7c75eb-c39f-4be4-92ae-29efda5d7d69"),
-            "{s}"
-        );
-        assert!(s.contains("subagent a1ded78ef5b657fa6"), "{s}");
-        assert!(s.contains("keyed tier"), "{s}");
-        assert!(s.contains("branch   wt/skeleton"), "{s}");
-    }
-
-    /// A pre-0.11.0 row — line 3 — prints no chain at all rather than five
-    /// `none`s. An older ledger is not a damaged one.
-    #[test]
-    fn a_row_without_a_chain_prints_no_chain() {
-        let dir = fixture();
-        let e = finding(&ledger(dir.path()), 3).unwrap();
-        let mut w = Vec::new();
-        context(&e, &ledger(dir.path()), &mut w).unwrap();
-        let s = String::from_utf8(w).unwrap();
-        for line in ["harness", "model", "session", "subagent", "branch"] {
-            assert!(!s.contains(line), "{line} named on a pre-0.11.0 row: {s}");
-        }
-        // ... and what it does carry is still there.
-        assert!(s.contains("agent `integration`"), "{s}");
+        assert_eq!(e.branch.as_deref(), Some("wt/skeleton"));
     }
 
     #[test]
