@@ -1,0 +1,12 @@
+{
+  "agent": "learnings",
+  "path": "docs/session-learnings.md",
+  "acquired_at": "2026-08-20T07:01:11.359084624+00:00",
+  "ttl_secs": 7200,
+  "note": "recount-1cw: phase 3, turn recount on its makers",
+  "branch": "wt/learnings",
+  "worktree": "learnings",
+  "invoked_from": "learnings",
+  "harness": "claude-code",
+  "model": "claude-opus-5"
+}

@@ -1,0 +1,13 @@
+{
+  "agent": "learnings",
+  "path": "docs/worked-example.md",
+  "acquired_at": "2026-08-20T07:01:11.364860249+00:00",
+  "ttl_secs": 7200,
+  "note": "recount-1cw: phase 3, turn recount on its makers",
+  "branch": "wt/learnings",
+  "worktree": "learnings",
+  "invoked_from": "learnings",
+  "content_hash": "791b4f756e7dde3fd24478c432032f9e79368a4e",
+  "harness": "claude-code",
+  "model": "claude-opus-5"
+}
