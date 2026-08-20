@@ -208,6 +208,26 @@ fn write_ledger(f: &Fixture, body: &[u8]) {
     std::fs::write(&path, body).expect("write ledger");
 }
 
+/// A canned `pact audit --json` document in the fixture repo, and its path.
+///
+/// `testify` is the one command whose input is a document rather than a
+/// directory, so every case below has to hand it one. Two findings, by eye:
+/// `stale_holds[0]` names `alice` at 10:00Z — the ledger's own line 2 — and
+/// `topology_mismatches[0]` names nobody. On a repo with no sessions the first
+/// is untestifiable (exit 1) and the second passes through untouched, which is
+/// not a failure and never was.
+///
+/// The four statistics arrays are populated on purpose: a reader that stopped
+/// treating them as statistics would report five findings here.
+fn audit(f: &Fixture) -> String {
+    s(&f.file2("audit.json", "audit-degradation.json"))
+}
+
+/// The clean-audit counterpart: every array empty, so `testify` answers 0.
+fn empty_audit(f: &Fixture) -> String {
+    s(&f.file2("audit-empty.json", "audit-empty.json"))
+}
+
 /// The worst case there is: a directory with nothing in it, no `~/.claude`, no
 /// `.pact`, and not a git repository. Four of the five say so and stop; doctor
 /// reports all four absences and exits 0, because doctor is the command you
@@ -216,6 +236,7 @@ fn write_ledger(f: &Fixture, body: &[u8]) {
 fn a_bare_directory_is_named_not_crashed_into() {
     let f = Fixture::new();
     let bare = s(&sibling(&f, "bare"));
+    let doc = audit(&f);
     let not_git = "is not a git repository";
 
     check_all(
@@ -249,6 +270,13 @@ fn a_bare_directory_is_named_not_crashed_into() {
                 Out::Error,
                 &["no pact ledger at", &bare, "nothing to explain here"],
             ),
+            // The document parses; the repo is what is wrong, and the error
+            // has to say so rather than blame the input.
+            case(
+                &["testify", "--repo", &bare, "--file", &doc],
+                Out::Error,
+                &[&bare, not_git],
+            ),
             // Doctor's whole argument: a doctor that exits non-zero gets
             // wrapped in `|| true` and then its exit code means nothing. The
             // machine-readable verdict is `join_readiness.ready`.
@@ -274,6 +302,8 @@ fn a_repo_with_events_and_no_sessions_answers_every_command() {
     let f = Fixture::new();
     f.events("events.jsonl");
     let repo = s(f.repo());
+    let doc = audit(&f);
+    let empty = empty_audit(&f);
 
     check_all(
         &f,
@@ -306,6 +336,26 @@ fn a_repo_with_events_and_no_sessions_answers_every_command() {
                 &["explain", "--repo", &repo, "--event-line", "2"],
                 Out::Report(1),
                 &["line 2", "agent `alice`", "no cwd match"],
+            ),
+            // The bead's shape for `testify`: findings arrive, no transcript
+            // can answer them, and the reason for each is listed rather than
+            // rolled into a bare exit code.
+            case(
+                &["testify", "--repo", &repo, "--file", &doc],
+                Out::Report(1),
+                &[
+                    "findings 2 · testified 0 · untestified 1 · passed through 1",
+                    "stale_holds[0] — agent `alice`",
+                    "no cwd match",
+                    "no agent and no moment: passed through untouched",
+                ],
+            ),
+            // A clean audit through the same repo: nothing to answer is an
+            // answer, and it exits 0.
+            case(
+                &["testify", "--repo", &repo, "--file", &empty],
+                Out::Report(0),
+                &["nothing to testify: the audit found nothing"],
             ),
             case(
                 &["doctor", "--repo", &repo],
@@ -512,6 +562,7 @@ fn a_garbage_ledger_costs_lines_not_the_run() {
     let f = Fixture::new();
     write_ledger(&f, b"not json at all\n{{{\n\x00\x01\xff\xfe\n");
     let repo = s(f.repo());
+    let doc = audit(&f);
 
     check_all(
         &f,
@@ -520,6 +571,14 @@ fn a_garbage_ledger_costs_lines_not_the_run() {
                 &["explain", "--repo", &repo, "--event-line", "1"],
                 Out::Error,
                 &["line 1 of 3 did not parse as an event"],
+            ),
+            // The finding points at ledger line 2, which is garbage. The
+            // chain is simply unavailable — not an error — so the join falls
+            // to the ladder and refuses there.
+            case(
+                &["testify", "--repo", &repo, "--file", &doc],
+                Out::Report(1),
+                &["stale_holds[0] — agent `alice`", "no cwd match"],
             ),
             case(
                 &["doctor", "--repo", &repo],
@@ -652,6 +711,7 @@ fn a_repo_that_is_absent_or_is_a_file_is_named_as_such() {
     f.events("events.jsonl");
     let gone = s(&f.repo().parent().expect("base").join("nope"));
     let file = s(&f.repo().join("README.md"));
+    let doc = audit(&f);
 
     for (repo, why) in [
         (&gone, "cannot resolve path"),
@@ -679,6 +739,11 @@ fn a_repo_that_is_absent_or_is_a_file_is_named_as_such() {
                     &["explain", "--repo", repo, "--event-line", "1"],
                     Out::Error,
                     &["no pact ledger at", repo],
+                ),
+                case(
+                    &["testify", "--repo", repo, "--file", &doc],
+                    Out::Error,
+                    &[repo, why],
                 ),
                 // Doctor still runs. It is the only way to find out why.
                 case(

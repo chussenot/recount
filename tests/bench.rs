@@ -1,11 +1,19 @@
-//! Two measurements, not a benchmarking harness.
+//! Three measurements, not a benchmarking harness.
 //!
 //! `docs/spec.md`, "Proof obligations", puts a ceiling on exactly two numbers:
 //!
 //! > Bench: pruned `at` <100ms; unwindowed grep over 500 synthetic sessions
 //! > (~200MB) <2s.
 //!
-//! Both tests here are `#[ignore]`d so CI stays fast. Run them with:
+//! Those two are [`spec_ceilings_on_a_synthetic_corpus`] and they are the
+//! 0.1.0 contract: untouched here, and not to be moved. 0.2.0 added a third,
+//! [`keyed_at_beats_the_topological_scan`] — the keyed tier under 20 ms and
+//! ahead of the path that scans — because a tier that resolves by name has to
+//! be visibly cheaper than one that searches or it is not resolving by name.
+//! It generates its own corpus rather than sharing theirs, so a change to it
+//! cannot move their numbers.
+//!
+//! Every test here is `#[ignore]`d so CI stays fast. Run them with:
 //!
 //! ```text
 //! cargo test --release --test bench -- --ignored --nocapture
@@ -25,9 +33,13 @@
 //!
 //! # Result, at the time of writing
 //!
-//! **Both ceilings are met.** Ceiling 1 with room to spare (15-65 ms against
-//! 100 ms; the margin moves with machine load, the verdict does not).
-//! Ceiling 2 at ~1.0-1.2 s against 2 s.
+//! **All three ceilings are met.** Ceiling 1 with room to spare (15-65 ms
+//! against 100 ms; the margin moves with machine load, the verdict does not).
+//! Ceiling 2 at ~1.0-1.2 s against 2 s. The keyed ceiling at ~10 ms against
+//! 20 ms, which is 35x under the topological path that scans and about 20%
+//! under the topological path that answers — the whole of that second, smaller
+//! margin being the transcript read the mention tiebreaker does and the keyed
+//! tier does not.
 //!
 //! Ceiling 2 was missed when this file was written — ~2.8 s, and the assert
 //! fired. That was reported as a finding rather than softened, and
@@ -108,6 +120,17 @@ const BODY_BYTES: usize = 10_000;
 /// The spec's two ceilings.
 const AT_CEILING: Duration = Duration::from_millis(100);
 const GREP_CEILING: Duration = Duration::from_secs(2);
+
+/// recount-1cw.10's ceiling for the keyed tier. Not a spec number — the spec
+/// predates pact 0.11.0 — but a contract all the same, and a much tighter one:
+/// a keyed answer is a path join and one `stat`, so five times under the
+/// topological ceiling is the loose end of what it should cost.
+const KEYED_CEILING: Duration = Duration::from_millis(20);
+
+/// The identity the keyed corpus is keyed by. Both are opaque tokens to
+/// `claude_code::keyed`, which checks their shape and joins the path.
+const KEYED_SESSION: &str = "11111111-2222-3333-4444-555555555555";
+const KEYED_SUB: &str = "a1ded78ef5b657fa6";
 
 /// The fleet identity the answering path resolves. Word-boundary matched by
 /// the join, so it must not occur in the filler text `generate` writes.
@@ -250,6 +273,158 @@ fn spec_ceilings_on_a_synthetic_corpus() {
         "unwindowed `grep` took {}, ceiling {}",
         ms(grep.1.took),
         ms(GREP_CEILING)
+    );
+}
+
+/// recount-1cw.10's ceiling: a keyed `at` is a path join and one `stat`, and it
+/// has to beat the topological path that scans.
+///
+/// # What is being compared, and what is NOT
+///
+/// The same corpus, the same repo, the same instant, three commands:
+///
+/// * **keyed** — `explain` on a ledger row carrying `harness_session` +
+///   `harness_subagent`. The join is one path join and one `stat`.
+/// * **topological, answering** — `at` on the same instant with no chain. The
+///   ladder runs: cwd resolution, scoring, and a transcript read for the
+///   mention tiebreaker.
+/// * **topological, scanning** — `at` a month later, which refuses on topology
+///   and so repeats the whole discovery unwindowed (see [`cmd::at::decide`]).
+///   This is *the scan*, and it is what the assert below is against.
+///
+/// **The keyed tier does not skip discovery, and this bench is honest about
+/// it.** `join::resolve` is handed a `&[SessionMeta]` that `at` has already
+/// built by parsing every file the mtime window admits, and the keyed answer
+/// has to be found among them (`join::keyed_match`). So what the key removes is
+/// the *ladder* — the cwd chain, the scoring, the transcript reads — and the
+/// unwindowed re-scan a topological refusal triggers. It does not remove the
+/// windowed parse, and on a corpus the window does not prune, keyed costs what
+/// everything else costs. The number below is therefore a windowed number, on
+/// the same 499-of-500-pruned corpus SPEC CEILING 1 uses, and it should be read
+/// as "the key costs nothing on top of the window", not as "the key replaced
+/// the scan".
+///
+/// # Why the assert is against the scanning path and not the answering one
+///
+/// Both keyed and topological-answering are dominated by process spawn plus the
+/// same windowed discovery, so they differ by a hair and a strict
+/// `keyed < answering` would be a coin flip dressed up as a contract. The
+/// scanning path is the one the bead's sentence is about — "a path join and a
+/// stat against a scan" — and it is a real margin, printed as a ratio so a
+/// regression that quietly turns the key back into a search is visible rather
+/// than merely un-asserted.
+#[test]
+#[ignore = "generates ~200MB; run explicitly, in release: cargo test --release --test bench -- --ignored --nocapture"]
+fn keyed_at_beats_the_topological_scan() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tempfile::tempdir().expect("tempdir");
+    let repo = repo_dir.path().canonicalize().expect("canonicalize");
+    git_init(&repo);
+
+    let target = Utc.with_ymd_and_hms(2026, 1, 15, 12, 0, 0).unwrap();
+    let bytes = generate(home.path(), &repo, target);
+    let keyed_path = write_keyed(home.path(), &repo, target);
+
+    // --- the keyed path: one ledger row naming the transcript above.
+    let keyed = twice(home.path(), &explain_args(&repo, 1));
+    // --- the ladder, answering, on the same instant.
+    let answering = twice(home.path(), &at_args(&repo, target));
+    // --- the ladder, scanning: a month past every mtime, so the cheap pass
+    // refuses on topology and the whole corpus is re-opened unwindowed.
+    let stale = target + chrono::Duration::days(30);
+    let scanning = twice(home.path(), &at_args(&repo, stale));
+
+    let ratio = scanning.1.took.as_secs_f64() / keyed.1.took.as_secs_f64().max(f64::EPSILON);
+
+    println!("\n{}", header());
+    println!("corpus            : {SESSIONS} synthetic sessions, {TURNS_PER_SESSION} turns each, {} total (tempdir, deleted on exit)", mb(bytes));
+    println!(
+        "                    plus one keyed subagent transcript, {} bytes, at {}",
+        fs::metadata(&keyed_path).map(|m| m.len()).unwrap_or(0),
+        keyed_path.display()
+    );
+    println!("page cache        : warm (the corpus was written by this test moments before); run 1 / run 2 both shown");
+    println!("window            : the default ±5m, so 499 of 500 sessions are pruned on mtime and never opened");
+    println!();
+    println!("recount-1cw.10 CEILING — keyed `at` (via `explain`)      < 20 ms");
+    println!(
+        "  run 1 {}   run 2 {}   exit {}   [one path join, one stat, no score]",
+        ms(keyed.0.took),
+        ms(keyed.1.took),
+        keyed.1.code
+    );
+    println!("  {}", verdict(keyed.1.took, KEYED_CEILING));
+    println!();
+    println!("(not a ceiling) the topological ladder, same corpus, same instant");
+    println!(
+        "  answering  run 1 {}   run 2 {}   exit {}   [cwd chain, scoring, one transcript read]",
+        ms(answering.0.took),
+        ms(answering.1.took),
+        answering.1.code
+    );
+    println!(
+        "  scanning   run 1 {}   run 2 {}   exit {}   [refuses on topology, re-opens all {SESSIONS} unwindowed]",
+        ms(scanning.0.took),
+        ms(scanning.1.took),
+        scanning.1.code
+    );
+    println!("  keyed is {ratio:.1}x faster than the scan.");
+    println!(
+        "  Read the answering figure as a control, not a comparison: it and the keyed run pay"
+    );
+    println!(
+        "  the same spawn and the same windowed discovery, so they cannot differ by much. The"
+    );
+    println!("  key buys the ladder and the re-scan, not the parse — see this test's doc comment.");
+    println!();
+
+    // Correctness first: a fast wrong answer is not a measurement.
+    assert_eq!(
+        keyed.1.code, 0,
+        "the keyed path must answer:\n{}",
+        keyed.1.stderr
+    );
+    let doc: serde_json::Value =
+        serde_json::from_str(&keyed.1.stdout).expect("the keyed run printed one JSON document");
+    assert_eq!(
+        doc["best"]["tier"], "keyed",
+        "this did not measure the keyed tier"
+    );
+    assert_eq!(
+        doc["best"]["confidence"],
+        serde_json::Value::Null,
+        "a keyed answer carries no score"
+    );
+    assert!(
+        doc["best"]["session"]["path"]
+            .as_str()
+            .is_some_and(|p| p.ends_with(&format!("agent-{KEYED_SUB}.jsonl"))),
+        "the keyed tier answered with the wrong file: {}",
+        doc["best"]["session"]["path"]
+    );
+    assert_eq!(
+        scanning.1.code, 1,
+        "the scanning path must refuse:\n{}",
+        scanning.1.stderr
+    );
+
+    if cfg!(debug_assertions) {
+        println!("DEBUG BUILD — nothing asserted. Re-run with --release for the numbers the ceiling means.\n");
+        return;
+    }
+    assert!(
+        keyed.1.took < KEYED_CEILING,
+        "keyed `at` took {}, ceiling {}",
+        ms(keyed.1.took),
+        ms(KEYED_CEILING)
+    );
+    assert!(
+        keyed.1.took < scanning.1.took,
+        "keyed `at` ({}) did not beat the topological scan ({}) — a path join and a \
+         stat cannot lose to re-opening {SESSIONS} files, so the keyed tier is not \
+         keyed any more",
+        ms(keyed.1.took),
+        ms(scanning.1.took)
     );
 }
 
@@ -447,6 +622,59 @@ fn generate(home: &Path, repo: &Path, target: DateTime<Utc>) -> u64 {
     total
 }
 
+/// The keyed half of the corpus: one subagent transcript at the nested path
+/// `claude_code::keyed` joins to, and a one-row ledger that names it.
+///
+/// Small on purpose. The keyed tier does one `stat` and then reads the file it
+/// found, so a 10 MB transcript would measure a read the key did not cause. The
+/// 200 MB beside it is what the *window* has to prune, which is the cost this
+/// number is about.
+///
+/// Returns the transcript's path.
+fn write_keyed(home: &Path, repo: &Path, target: DateTime<Utc>) -> PathBuf {
+    let path = home
+        .join(".claude")
+        .join("projects")
+        .join(encode(repo))
+        .join(KEYED_SESSION)
+        .join("subagents")
+        .join(format!("agent-{KEYED_SUB}.jsonl"));
+    fs::create_dir_all(path.parent().expect("subagents dir")).expect("mkdir subagents");
+    let cwd = serde_json::to_string(&repo.display().to_string()).expect("cwd json");
+    let file = File::create(&path).expect("keyed transcript");
+    let mut w = BufWriter::new(&file);
+    for t in 0..3 {
+        let ts =
+            (target + chrono::Duration::seconds(t)).to_rfc3339_opts(SecondsFormat::Millis, true);
+        writeln!(
+            w,
+            r#"{{"type":"assistant","sessionId":"{KEYED_SESSION}","agentId":"{KEYED_SUB}","cwd":{cwd},"timestamp":"{ts}","message":{{"role":"assistant","model":"claude-opus-5","content":[{{"type":"text","text":"keyed turn {t}"}}]}}}}"#
+        )
+        .expect("write keyed turn");
+    }
+    w.flush().expect("flush");
+    drop(w);
+    // Inside the window, like the corpus's own live session: the keyed tier
+    // still has to find its answer among the sessions discovery produced.
+    file.set_times(
+        FileTimes::new().set_modified(SystemTime::from(target + chrono::Duration::seconds(3))),
+    )
+    .expect("set mtime");
+
+    let ledger = repo.join(".pact").join("events.jsonl");
+    fs::create_dir_all(ledger.parent().expect(".pact")).expect("mkdir .pact");
+    fs::write(
+        &ledger,
+        format!(
+            r#"{{"at":"{}","agent":"{AGENT}","kind":"acquired","path":"src/join.rs","detail":"recount-1cw.10: the keyed measurement","chain_hash":"1111","pact_version":"0.11.0","harness":"claude-code","model":"claude-opus-5","harness_session":"{KEYED_SESSION}","harness_subagent":"{KEYED_SUB}"}}
+"#,
+            target.to_rfc3339_opts(SecondsFormat::Millis, true)
+        ),
+    )
+    .expect("write ledger");
+    path
+}
+
 fn git_init(repo: &Path) {
     let out = Command::new("git")
         .args(["init", "-q"])
@@ -489,6 +717,19 @@ fn at_args(repo: &Path, ts: DateTime<Utc>) -> [String; 8] {
         AGENT.into(),
         "--ts".into(),
         ts.to_rfc3339_opts(SecondsFormat::Millis, true),
+        "--json".into(),
+    ]
+}
+
+/// `explain` is the only command that reaches the keyed tier: `at`'s own flags
+/// cannot name a transcript, so the chain has to come off a ledger row.
+fn explain_args(repo: &Path, line: usize) -> [String; 6] {
+    [
+        "explain".into(),
+        "--repo".into(),
+        repo.display().to_string(),
+        "--event-line".into(),
+        line.to_string(),
         "--json".into(),
     ]
 }

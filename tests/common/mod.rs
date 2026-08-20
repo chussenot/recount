@@ -43,6 +43,15 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+/// The two committed fixture directories under `tests/`.
+///
+/// Two rather than one because they are owned by different beads and a pact
+/// lease is per path: `tests/fixtures/` is the 0.1.0 known-join corpus,
+/// `tests/fixtures2/` is 0.2.0's keyed tree, model transcripts and canned
+/// audit documents. Nothing distinguishes them to the loader.
+const FIXTURES: &str = "fixtures";
+const FIXTURES2: &str = "fixtures2";
+
 /// A temporary `$HOME` beside a temporary git repo.
 pub struct Fixture {
     /// Kept alive for the drop; the tree goes when the test does.
@@ -103,7 +112,7 @@ impl Fixture {
     /// Install `tests/fixtures/<fixture>` as this repo's `.pact/events.jsonl`.
     pub fn events(&self, fixture: &str) -> PathBuf {
         let path = self.repo.join(".pact").join("events.jsonl");
-        self.install(fixture, &path);
+        self.install(FIXTURES, fixture, &path);
         path
     }
 
@@ -117,7 +126,7 @@ impl Fixture {
             .join("projects")
             .join(encode(cwd))
             .join(name);
-        self.install(fixture, &path);
+        self.install(FIXTURES, fixture, &path);
         path
     }
 
@@ -131,6 +140,36 @@ impl Fixture {
             .join(encode(cwd))
             .join(name);
         write(&path, &self.subst(body));
+        path
+    }
+
+    /// [`Fixture::events`], from [`FIXTURES2`].
+    pub fn events2(&self, fixture: &str) -> PathBuf {
+        let path = self.repo().join(".pact").join("events.jsonl");
+        self.install(FIXTURES2, fixture, &path);
+        path
+    }
+
+    /// [`Fixture::session`], from [`FIXTURES2`]. `name` may contain separators
+    /// — `<session>/subagents/agent-<id>.jsonl` is the nested layout the keyed
+    /// tier joins to, and the parent directories are created.
+    pub fn session2(&self, cwd: &Path, name: &str, fixture: &str) -> PathBuf {
+        let path = self
+            .home
+            .join(".claude")
+            .join("projects")
+            .join(encode(cwd))
+            .join(name);
+        self.install(FIXTURES2, fixture, &path);
+        path
+    }
+
+    /// Install [`FIXTURES2`]`/<fixture>` at `<repo>/<name>` and return the
+    /// path, for a document a command reads with `--file` rather than
+    /// discovers.
+    pub fn file2(&self, name: &str, fixture: &str) -> PathBuf {
+        let path = self.repo.join(name);
+        self.install(FIXTURES2, fixture, &path);
         path
     }
 
@@ -150,10 +189,10 @@ impl Fixture {
         }
     }
 
-    fn install(&self, fixture: &str, dest: &Path) {
+    fn install(&self, dir: &str, fixture: &str, dest: &Path) {
         let src = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests")
-            .join("fixtures")
+            .join(dir)
             .join(fixture);
         let body = std::fs::read_to_string(&src)
             .unwrap_or_else(|e| panic!("reading fixture {}: {e}", src.display()));
