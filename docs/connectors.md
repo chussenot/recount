@@ -55,6 +55,103 @@ content|text}`, best-effort, and deliberately no larger than that one line of
 spec. No cwd (so the topological join correctly refuses these sessions), no
 block-type parser, no sniffing, no repair.
 
+## Resolving a transcript by id
+
+pact 0.11.0 events can name the transcript they were written from, and
+`claude_code::keyed` turns that name into a path. It is deliberately the
+smallest thing that can: one path join and one `is_file()`.
+
+```text
+<project_dir>/<session>.jsonl                              subagent: None
+<project_dir>/<session>/subagents/agent-<subagent>.jsonl   subagent: Some
+```
+
+It is **not a fifth trait method**, for the same reason claiming is not a third
+one: it is specific to a format that happens to name its files after its ids,
+and putting it on the trait would ask `generic_jsonl` to have an opinion about
+a key it has never heard of. The join calls the free function directly and
+`Keyed` is its own type, not an `Option<PathBuf>`:
+
+| outcome | means | what to do |
+|---|---|---|
+| `Found(path)` | the file is on disk | read it |
+| `Absent(path)` | the ids are fine, the path is right, nothing is at it | look elsewhere — pruned, or the ledger came from another machine |
+| `Malformed(why)` | the id is not an id; nothing was joined and nothing was stat'd | look at the ledger, not the disk |
+
+Collapsing the last two into a `None` would send a human hunting on disk for a
+transcript that was never named. [join.md](join.md) has what the join does with
+each.
+
+**Both ids are validated as opaque tokens**: non-empty, `[A-Za-z0-9-]` only.
+That is not a uuid check and not a hex check, on purpose — this format is
+reverse-engineered and expected to drift, and a stricter grammar would answer
+`Malformed` to an id a later Claude Code mints perfectly legally. It is exactly
+strict enough to make a join a join: no `/`, no `..`, no NUL, no `~`, so a
+corrupt or hostile ledger cannot walk out of the directory it is joined into.
+That is the trust boundary, and it is the reason the check is a shape check
+rather than a taste check.
+
+Nothing here opens the file. `agentId` inside it is the authority if the
+filename is ever doubted ([format-notes.md](format-notes.md) §10.5), and a
+caller who wants that certainty is already reading the file. The filename and
+the field agreed in 604 of 604 files, so nothing is bought by checking it here.
+
+Where the ids come from is [format-notes.md](format-notes.md) §10: an agent can
+learn its own transcript id, and the only recipe that works is a marker grep
+with a one-match-or-nothing guard. Do not reimplement it from memory — the
+obvious recipe, newest file by mtime, was measured returning the *wrong* agent,
+symmetrically, for two agents spawned in the same wave (§10.2). That measurement
+is why the guard exists and why absence beats a plausible wrong id.
+
+**The ceiling, measured 2026-08-19:** 371 of 634 subagent transcripts on this
+machine live one level deeper, in `subagents/workflows/wf_<id>/`, and no pact
+event carries a `wf_` id ([format-notes.md](format-notes.md) §11.0). Those
+resolve `Absent` and belong to the topological join. That costs nothing today
+only because the self-id recipe globs the flat directory, so an id that reached
+an event came from a flat file by construction — a condition, not a property.
+**Do not fix it by scanning `workflows/`.** If a future harness hands an agent
+its id directly, the fix is one bounded `read_dir`, still not a walk.
+
+## The model is recorded per turn, not per session
+
+`Identity.models` carries every distinct model a file's assistant lines
+recorded, most frequent first, ties by first appearance — the same rule as
+`Identity.cwds`, so there is one rule to remember rather than two.
+
+It is a set because the record is a set, not because the field is patchy:
+`.message.model` is on **85,242 of 85,242 assistant lines** in this corpus
+(2026-08-19, 880 files) and on no other line kind. 10 files switch between two
+real models mid-transcript, 3 of them subagent files
+([format-notes.md](format-notes.md) §11.1). A resumed session and a mid-run
+`/model` both land there and nothing in the record tells them apart, so "the
+model of a session" does not exist, exactly as "the cwd of a session" does not.
+A connector that returned one value would be picking a winner and calling it a
+fact.
+
+The value is a bare slug, verbatim — `claude-opus-5`,
+`claude-haiku-4-5-20251001` — the same shape a `PACT_MODEL` value has, which is
+what makes the comparison a string comparison. Empty is a real and unalarming
+state: a file with no assistant line records no model, and a comparison with
+nothing to compare stays silent.
+
+**`<synthetic>` is excluded, and that exclusion is load-bearing.** All 80 lines
+carrying it are records Claude Code wrote itself, not model responses: 72 are
+API errors it rendered as turns — 429, 401, 400, 529 — and 8 are its
+"No response requested." no-op ([format-notes.md](format-notes.md) §11.2). The
+*turns* are still emitted, because "the run stalled because the API said 429"
+is exactly what an audit wants. Only the model is disowned. An agent that
+declared `PACT_MODEL=claude-opus-5` and hit one rate limit would otherwise be
+reported as having run a model it did not declare — a discrepancy manufactured
+by the tool, in the one output whose entire purpose is to be believed.
+
+The sidecar's own `model` key is a different thing and is still not read
+(§11.1): it is on 70 of 634 sidecars, and it holds the spawn-time alias the
+caller asked for (`sonnet`, `opus`, `haiku`), not the slug that answered.
+
+`Identity` is what `scan(path)` returns beside the `SessionMeta`, so this is
+connector-level today: as of 2026-08-20 no command prints `models` — `sessions`
+reaches for `scan` only for `cwds`.
+
 ## The claim rule
 
 **A path belongs to the most specific connector that recognises it**, and
