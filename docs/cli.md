@@ -408,6 +408,7 @@ never absent.
             "tier": "keyed" | "topological",
             "confidence": 0.65,             // null when "tier" is "keyed"
             "confident": true,
+            "lead": false,                  // true = the chain did not discriminate: never confident
             "evidence": [ { "signal": "keyed" | "topology" | "time_overlap"
                                     | "transcript_mention", "detail": "…" }, … ],
             "transcript": [ { "ts": …, "role": …, "text": …, "line": … }, … ] },
@@ -425,6 +426,14 @@ explicit `null` where the number would be, rather than a number nobody computed:
 `confidence` keeps its meaning, and a reader that finds `null` there knows there
 was nothing to be uncertain about. Apply `threshold` to `confidence` only when
 `tier` is `"topological"` — a keyed answer clears every bar, including 1.0.
+
+`confident` is **not** just `confidence >= threshold`. It is also false when
+`lead` is true — the chain filtered without discriminating, so the transcript
+mention is what picked this session out of its siblings, and no score reachable
+that way is an answer. The score is still computed and still printed; the
+digest's verdict reads `LEAD — NOT CONFIDENT` and the topology evidence line
+says why in words. See [join.md](join.md) for the measurement behind the rule.
+Branch on `confident`; `lead` tells you *which* of the two ways it failed.
 
 `model_check` is null, and the digest silent, whenever either side is missing or
 `confident` is false. Never an error: a comparison that cannot be made is not a
@@ -477,6 +486,7 @@ failed comparison.
           "tier": "keyed" | "topological",
           "confidence": null,               // null when "tier" is "keyed"
           "confident": true,
+          "lead": false,                    // true = the chain did not discriminate: never confident
           "evidence": [ { "signal": …, "detail": "…" }, … ],
           "window": { "since": …, "until": … },
           "transcript": [ { "ts": …, "role": …, "text": …, "line": … }, … ] },

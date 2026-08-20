@@ -60,11 +60,14 @@
 //!    session in the repo for every moment in it. The gate is
 //!    [`Match::in_window`], the turns actually inside, and it is non-empty on
 //!    every topological answer by construction.
-//! 3. **Transcript mention** — the tiebreaker. The PACT_AGENT name or a bead
-//!    id appearing in the transcript raises confidence between sessions that
-//!    already passed 1 and 2. It never creates a match on its own: an agent
-//!    discussing `skeleton` is not `skeleton`, and a session the chain
-//!    excluded is never scored, however often it says the name.
+//! 3. **Transcript mention** — the tiebreaker, and ONLY a tiebreaker. The
+//!    PACT_AGENT name or a bead id appearing in the transcript raises the
+//!    score between sessions that already passed 1 and 2. It never creates a
+//!    match on its own: an agent discussing `skeleton` is not `skeleton`, and
+//!    a session the chain excluded is never scored, however often it says the
+//!    name. Nor does it ever *decide* one: an answer the mention picked out,
+//!    with topology unable to separate the candidates, is a lead and is never
+//!    confident whatever it scores ([`Match::lead`]).
 //!
 //! # The chain can filter without discriminating (topology A and topology B)
 //!
@@ -81,14 +84,29 @@
 //!   returns *every* session in the repo for *every* worktree: it still
 //!   filters, but it cannot tell the candidates apart.
 //!
+//! There is a third door into the same degeneracy, and it looks like the happy
+//! path from the inside: `invoked_from: main` resolves to the **repo root**,
+//! which every agent not in a worktree shares. If the corpus holds exactly one
+//! session with its cwd there, a naive count of exact links says one — "the
+//! chain singled a session out" — when what it has actually measured is how
+//! many sessions the corpus contains, not what the chain can tell apart. That
+//! is not a hypothetical: on pact's own ledger it awarded 0.95 to eighteen
+//! stale-hold findings, all landing on one 13-day session. So the root is
+//! excluded before the count ([`Topology::SharedRoot`]), which is what
+//! [`crate::cmd::sessions`] and [`crate::cmd::grep`] have always said about a
+//! root cwd — that it names no one.
+//!
 //! A confident answer produced by a key that could not discriminate is exactly
 //! the arkanoid-v1 misdiagnosis this tool was written against — committed by
 //! the tool built to prevent it. So [`resolve`] detects the degenerate case
 //! ([`Topology`]): when no surviving candidate's cwd names the worktree
-//! `invoked_from` named, or when several do and the chain cannot separate
-//! them, topology scores as a filter rather than as a discriminator, the
-//! mention signal becomes the decisive one, and the resulting confidence is
-//! lower. Every answer says which regime it was decided in.
+//! `invoked_from` named, when several do and the chain cannot separate them,
+//! or when the name resolves to the shared root, topology scores as a filter
+//! rather than as a discriminator, the mention signal becomes the decisive
+//! one — and the answer is a LEAD ([`Match::lead`]): scored, evidenced,
+//! printed, and never confident, because what decided it was testimony the
+//! chain could not corroborate. Every answer says which regime it was decided
+//! in, and a lead says in words that it is one.
 //!
 //! # Never a bare answer
 //!
@@ -160,6 +178,41 @@ pub struct Match {
     /// renderer that finds it empty is looking at a keyed answer, which never
     /// consulted the clock and does not depend on it.
     pub in_window: Vec<Turn>,
+    /// The chain filtered but did not discriminate, so what picked THIS
+    /// session out of its siblings was the transcript mention. Such an answer
+    /// is a **lead**: printed, scored, evidenced — and never confident.
+    ///
+    /// This is a second, structural bar beside [`CONFIDENT`], and it is
+    /// deliberately not expressed as a number. Raising the threshold to 0.7
+    /// would reach the same eighteen findings and also every other rung on the
+    /// way past, which is a change to what "confident" means; this says the
+    /// one thing that is actually meant. Measured: the 0.65 rung — chain
+    /// filtered, mention decided — is 4 correct in 24 across four repositories
+    /// (`docs/session-learnings.md` §6), and .16 measured that windowing the
+    /// mention does not repair it, because an orchestrator session says
+    /// "orchestrator" in every ten-minute stretch of itself. A signal that is
+    /// true of every candidate cannot cast a deciding vote.
+    ///
+    /// Always `false` on a keyed answer: the keyed tier never consulted a cwd,
+    /// a clock or a transcript, so there was no tie for a mention to break.
+    /// Apply it with [`Match::confident`], never by reading the field beside a
+    /// hand-rolled threshold comparison.
+    pub lead: bool,
+}
+
+impl Match {
+    /// Does this answer stand on its own? The **one** verdict in the codebase,
+    /// and the only thing `at` and `testify` are allowed to ask.
+    ///
+    /// Two conditions, because there are two ways to fail to be an answer: the
+    /// score can fall short of [`CONFIDENT`], or the chain can have failed to
+    /// discriminate at all, in which case no score it happens to reach means
+    /// anything ([`Match::lead`]). [`Tier::clears`] is still the one place the
+    /// *number* is compared — a keyed answer clears every bar and is never a
+    /// lead — so nothing here re-derives a threshold.
+    pub fn confident(&self) -> bool {
+        !self.lead && self.tier.clears(CONFIDENT)
+    }
 }
 
 /// The reasons `at` is allowed to give for exit 1. One per question the reader
@@ -227,18 +280,22 @@ pub const CONFIDENT: f64 = 0.5;
 /// The arithmetic is a sum, and the numbers are chosen so that the *regime* is
 /// legible from the score alone:
 ///
-/// | outcome                                            | score |
-/// |----------------------------------------------------|------:|
-/// | chain singled the session out, + mention (topology A) | 0.95 |
-/// | chain singled it out, no mention                     | 0.70 |
-/// | chain only filtered, + mention (topology B)          | 0.65 |
-/// | chain only filtered, no mention                      | 0.40 |
+/// | outcome                                              | score | verdict |
+/// |------------------------------------------------------|------:|---------|
+/// | chain singled the session out, + mention (topology A) | 0.95 | answer |
+/// | chain singled it out, no mention (topology A)         | 0.70 | answer |
+/// | chain only filtered, + mention                        | 0.65 | LEAD |
+/// | chain only filtered, no mention                       | 0.40 | LEAD |
 ///
-/// The bottom row is below [`CONFIDENT`] on purpose: under topology B a
-/// repo-level cwd plus a clock overlap is true of every agent in the fleet,
-/// and answering from it would be the misdiagnosis in the module doc. The
-/// third row clears the bar but is visibly not the second: a mention is
-/// testimony, not topology.
+/// The bottom two rows are the ones the chain did not decide, and **neither
+/// is a confident answer, whatever the arithmetic says** — see
+/// [`Match::lead`]. 0.40 was always below [`CONFIDENT`]; 0.65 sat above it
+/// until this bead and was measured, over four repositories, at 4 correct in
+/// 24 (`docs/session-learnings.md` §6). The score is still computed and still
+/// printed, because a lead with its evidence is useful and a rung silently
+/// collapsed into another is not — what changed is what a mention is allowed
+/// to conclude on its own. A mention is testimony, and testimony that the
+/// chain could not corroborate does not carry a verdict.
 const TOPOLOGY_DISCRIMINATING: f64 = 0.5;
 const TOPOLOGY_FILTER: f64 = 0.2;
 const OVERLAP: f64 = 0.2;
@@ -257,6 +314,24 @@ enum Topology {
     /// No candidate names it — every candidate matched at an ancestor (repo)
     /// level only. The subagent-per-agent case.
     SubagentPerAgent,
+    /// `invoked_from` named the MAIN CHECKOUT, and a cwd there names no one.
+    ///
+    /// This is [`Topology::SubagentPerAgent`]'s degeneracy arriving through
+    /// the other door. Every agent that is not in a worktree runs in the repo
+    /// root, and every subagent of a parent started there records it too
+    /// (`docs/format-notes.md` §4.3), so "this session's cwd is the root" is a
+    /// property of the checkout, not of the session. Counting exact links
+    /// there and finding one does not mean the chain singled a session out; it
+    /// means the corpus happened to hold one session at the root, and a corpus
+    /// with two would have scored the identical evidence lower. A predicate
+    /// whose answer swings on how many OTHER sessions exist is not a
+    /// discriminator.
+    ///
+    /// `sessions` has said this for as long as it has had a topology signal —
+    /// "cwd `<repo>` is the repo root, which every agent of a pact run shares
+    /// (§4.3) — it names no one" — and so has `grep`. The join now agrees with
+    /// them instead of contradicting them one command over.
+    SharedRoot,
     /// Nothing named a worktree: no `invoked_from` and no worktree called
     /// after the agent. The chain filtered to "sessions in this repo".
     Unnamed,
@@ -284,6 +359,13 @@ impl Topology {
                 "topology B (subagent-per-agent): no candidate cwd names the worktree, \
                  every candidate sits at the shared parent cwd, so the chain filtered \
                  without discriminating and the transcript mention decides"
+            }
+            Topology::SharedRoot => {
+                "invoked_from named the MAIN CHECKOUT, which every agent not in a worktree \
+                 shares and every subagent of a parent started there records \
+                 (docs/format-notes.md §4.3) — a cwd at the repo root names no one, however \
+                 many sessions happen to sit there, so the chain filtered without \
+                 discriminating and the transcript mention decides"
             }
             Topology::Unnamed => {
                 "topology unnamed: nothing tied the agent to a worktree, so the chain \
@@ -512,6 +594,8 @@ fn keyed_match(
         // identity does not depend on it: it is what the session was SAYING
         // around the moment, not what proves it was this session.
         in_window: Vec::new(),
+        // No candidate set, so no tie, so nothing for a mention to break.
+        lead: false,
     })
 }
 
@@ -666,9 +750,21 @@ fn topological(
     // 4. Did the chain actually single anyone out? One exact link and the
     //    answer is topological; anything else and topology has only filtered,
     //    whatever the spec's happy path assumes.
+    //
+    //    The root is tested BEFORE the count, because at the root the count is
+    //    not evidence about the chain — it is evidence about the corpus. Every
+    //    agent not in a worktree shares the main checkout, so one session there
+    //    is one session there, not a session the chain picked out; measured on
+    //    pact's ledger, that coincidence alone awarded 0.95 to eighteen
+    //    findings that all resolved onto one 13-day session. `sessions` and
+    //    `grep` have both refused to read a root cwd as an identity since they
+    //    were written (`cmd::sessions`, `cmd::grep`, format-notes §4.3); this
+    //    is the join saying the same thing.
+    let root = worktrees.first().map(|w| w.path.as_path());
     let exact = overlapping.iter().filter(|s| s.c.exact).count();
     let topology = match (named, exact) {
         (None, _) => Topology::Unnamed,
+        (Some(w), _) if Some(w.path.as_path()) == root => Topology::SharedRoot,
         (Some(_), 0) => Topology::SubagentPerAgent,
         (Some(_), 1) => Topology::ProcessPerAgent,
         (Some(_), n) => Topology::Ambiguous(n),
@@ -790,9 +886,21 @@ fn score(query: &Query, s: Survivor, topology: Topology, window: &TimeWindow) ->
             c.resolved.name
         )
     };
+    // The regime, and — when the regime is one that cannot decide — the verdict
+    // that follows from it, in words. A reader must never have to infer "this
+    // is a lead" from the size of a number, which is precisely how a ledger of
+    // 0.65s came to be read as a ledger of answers.
     evidence.push(Evidence::new(
         Signal::Topology,
-        format!("{link} — {}", topology.observed()),
+        format!(
+            "{link} — {}{}",
+            topology.observed(),
+            match (topological, mention.is_some()) {
+                (true, _) => "",
+                (false, true) => LEAD_MENTION,
+                (false, false) => LEAD_SILENT,
+            }
+        ),
     ));
 
     // The signal, and the count that IS the signal. The span is reported second
@@ -839,9 +947,35 @@ fn score(query: &Query, s: Survivor, topology: Topology, window: &TimeWindow) ->
             tier: Tier::Topological(Confidence::new(total)),
             evidence,
             in_window,
+            lead: !topological,
         },
     )
 }
+
+/// What follows from a chain that filtered without discriminating, appended to
+/// the topology evidence line of every such answer, in the two shapes it comes
+/// in. See [`Match::lead`].
+///
+/// Two constants and not one because the two are different news: a mention
+/// picked this session out of its siblings, or nothing did. Saying "the
+/// transcript mention decided" on an answer where no mention was found would
+/// be reporting a signal that never fired.
+const LEAD_MENTION: &str =
+    ". THIS IS A LEAD, NOT A CONFIDENT ANSWER: what separated this session from its \
+     siblings was the transcript mention, and a mention is testimony the chain could not \
+     corroborate — an orchestrator session says every agent's name in every ten-minute \
+     stretch of itself. The score beside this line is printed in full and is not the \
+     reason: no score reachable without a discriminating chain is confident, and this rung \
+     — chain filtered, \
+     mention decided — was measured at 4 correct in 24 across four repositories \
+     (docs/session-learnings.md §6). Read the session as somewhere to look, not as the \
+     answer";
+
+const LEAD_SILENT: &str =
+    ". THIS IS A LEAD AT BEST, NOT AN ANSWER: the chain could not tell this session from \
+     its siblings and nothing else spoke for it either. The score beside this line is \
+     printed in full and is not the reason: no score reachable without a discriminating \
+     chain is confident";
 
 /// The PACT_AGENT name or the bead id, in the session's own words.
 fn mention(query: &Query, turns: &[Turn]) -> Option<String> {
@@ -1525,6 +1659,53 @@ mod tests {
 
         let m = resolve(&query("join", Some("join")), &wts, &sessions, &talk).unwrap();
         assert_eq!(m.session.path, sessions[1].path);
+    }
+
+    /// `invoked_from: main` resolves to the repo root, and the root names no
+    /// one — even when exactly one session sits there.
+    ///
+    /// This is the pact-ledger bug, in a fixture. One candidate, its cwd
+    /// exactly the main checkout, saying the agent's name: the old count said
+    /// `exact == 1`, called it topology A, and printed 0.95 CONFIDENT for
+    /// eighteen findings that all landed on one 13-day orchestrator session.
+    /// What that count measured was the corpus, not the chain. So: 0.65, a
+    /// lead, and the sentence that says why.
+    #[test]
+    fn the_repo_root_names_no_one_however_few_sessions_sit_there() {
+        let wts = fleet(&["join"]);
+        let sessions = vec![session(
+            "parent",
+            Some(REPO),
+            "2026-08-19T07:00:00Z",
+            "2026-08-19T08:00:00Z",
+        )];
+        let loud = transcripts(&[("parent", "spawning join to do the work")]);
+
+        let m = resolve(&query("join", Some("main")), &wts, &sessions, &loud).unwrap();
+        // The rungs are untouched: filter + overlap + mention, printed in full.
+        assert_eq!(score(&m), 0.65);
+        assert!(m.lead, "the root cannot discriminate, so this is a lead");
+        assert!(!m.confident(), "and a lead is never confident");
+        let why = &m.evidence[0].detail;
+        assert!(why.contains("names no one"), "{why}");
+        assert!(
+            why.contains("THIS IS A LEAD, NOT A CONFIDENT ANSWER"),
+            "{why}"
+        );
+
+        // The same fixture with the same session in the AGENT'S OWN worktree
+        // is topology A and does discriminate — so this is a rule about the
+        // root, not a blanket demotion.
+        let in_wt = vec![session(
+            "parent",
+            Some("/r/wt/join"),
+            "2026-08-19T07:00:00Z",
+            "2026-08-19T08:00:00Z",
+        )];
+        let m = resolve(&query("join", Some("join")), &wts, &in_wt, &loud).unwrap();
+        assert_eq!(score(&m), 0.95);
+        assert!(!m.lead);
+        assert!(m.confident());
     }
 
     /// The word-boundary rule, which under topology B is load-bearing: this is
