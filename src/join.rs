@@ -6,21 +6,33 @@
 //!
 //! # Two tiers, and only one of them is scored
 //!
-//! pact 0.11.0 stamps `harness_subagent` on the events it writes, and an event
-//! carrying one NAMES its transcript. Resolving it is a path join and one
-//! `is_file()` — no candidate set, no score, no tie to break — so it is not a
-//! fifth rung on the ladder below but a tier ABOVE the whole ladder:
+//! pact 0.11.0 stamps `harness_session` on the events it writes, plus
+//! `harness_subagent` when a subagent wrote them. Either way the event NAMES a
+//! transcript: with a subagent id it is that subagent's file, and with a
+//! session alone it is the top-level session's own file, sitting beside the
+//! `subagents/` directory and exactly as named. Resolving either is a path join
+//! and one `is_file()` — no candidate set, no score, no tie to break — so it is
+//! not a fifth rung on the ladder below but a tier ABOVE the whole ladder:
 //! [`Tier::Keyed`], evidenced by the filename that proved it. Everything from
 //! here to [`CONFIDENT`] is the tier BELOW: calibrated inference, unchanged by
-//! this, and reached only by an event with no `harness_subagent`. Neither tier
-//! is tuned in terms of the other — one is an identity, the other is a guess.
+//! this, and reached only by an event carrying no chain at all. Neither tier is
+//! tuned in terms of the other — one is an identity, the other is a guess.
 //!
-//! Which tier answered is on every result, and when it was the lower one the
-//! [`Signal::Keyed`] evidence line says why the higher one did not apply. The
-//! two ways that happens are different sentences with different next steps: **no
-//! `harness_subagent` on the event** means it was not written by a subagent,
-//! which is normal and where the ladder answers; **a keyed id whose file is
-//! absent** means the event named a transcript that is not there, which is a
+//! Which tier answered is on every result, and the [`Signal::Keyed`] line says
+//! which of three things happened — same tier for the first two, but three
+//! different answers to "who acted", so three different sentences:
+//!
+//! 1. **a subagent id, resolved** — the event named a SUBAGENT transcript, and
+//!    the actor is that subagent;
+//! 2. **a session with no subagent id, resolved** — the event named a TOP-LEVEL
+//!    session transcript, and the actor is the agent that owns the session and
+//!    is nobody's subagent;
+//! 3. **no chain at all** — a pre-contract row, written before pact stamped
+//!    either id. Nothing named a transcript, nothing is missing, and the ladder
+//!    below answers. Such a row is OLD, not defective; saying a subagent id was
+//!    expected of it would be reporting a field it never had.
+//!
+//! A chain that names a file which is not on disk is none of the three: it is a
 //! refusal ([`Refusal::NoKeyedTranscript`]) and never a quiet demotion to
 //! guessing.
 //!
@@ -268,16 +280,26 @@ struct Candidate<'a> {
     exact: bool,
 }
 
-/// The two tiers, in order: keyed if the event named its transcript, the
-/// scored ladder if it did not.
+/// The two tiers, in order: keyed if the event named a transcript, the scored
+/// ladder if it named none.
 ///
-/// **The gate is `harness_subagent` and nothing else.** Not `harness.is_some()`
-/// and not `harness_session.is_some()`: measured on this repo's own ledger, five
-/// rows carry `harness`, `model`, `harness_session` and `branch` with no subagent
-/// id — `kind=context` rows written by a top-level agent, which has a session and
-/// is not a subagent of anything, and every orchestrator row looks like that.
-/// Proxying on those fields would send the fleet's top-level events into a keyed
-/// lookup that cannot succeed, turning a normal state into a refusal.
+/// **The gate is the chain, and `harness_session` alone is enough of one.** A
+/// subagent id names `<session>/subagents/agent-<id>.jsonl`; a session with no
+/// subagent id names `<session>.jsonl` beside that directory, which is just as
+/// much a name and just as much on disk. That row was written by a TOP-LEVEL
+/// agent — one that has a session and is not a subagent of anything — and
+/// keying it is the same join and the same single stat. Measured on this repo's
+/// live ledger: 216 rows, 39 carry any chain, 13 of those are session-only (12
+/// orchestrator, 1 precheck), and those 13 are what Phase 3's self-audit runs
+/// against. The gate is still not `harness.is_some()` or `model.is_some()`:
+/// those name no file, and a gate on them would refuse where there is nothing
+/// to go and look for.
+///
+/// **This does not moot `recount-gwx`.** A v0.1.0-era row carries no
+/// `harness_session` either — line 60 of this repo's own ledger is an
+/// `orchestrator` `acquired` with both ids null — so pre-contract rows have
+/// nothing to key by, are untouched by this, and still reach the ladder with
+/// the path-order tie-break `gwx` is about waiting for them.
 ///
 /// `turns` reads a session's transcript for the mention tiebreaker. It is a
 /// callback so the join does not decide which connector owns a path and so
@@ -290,9 +312,12 @@ pub fn resolve(
     sessions: &[SessionMeta],
     turns: &dyn Fn(&Path) -> Vec<Turn>,
 ) -> Result<Match, Refusal> {
-    match query.harness_subagent {
-        Some(subagent) => keyed(query, subagent, worktrees, sessions),
-        None => topological(query, worktrees, sessions, turns),
+    match (query.harness_subagent, query.harness_session) {
+        // A subagent id wins where both are present: it names the narrower
+        // file, and the parent session is not who wrote the event.
+        (Some(subagent), _) => keyed(query, Some(subagent), worktrees, sessions),
+        (None, Some(_)) => keyed(query, None, worktrees, sessions),
+        (None, None) => topological(query, worktrees, sessions, turns),
     }
 }
 
@@ -316,7 +341,7 @@ pub fn resolve(
 /// to do, and it would hand the tie-break bug an identity it cannot touch.
 fn keyed(
     query: &Query,
-    subagent: &str,
+    subagent: Option<&str>,
     worktrees: &[Worktree],
     sessions: &[SessionMeta],
 ) -> Result<Match, Refusal> {
@@ -328,7 +353,7 @@ fn keyed(
 
     let mut looked: Vec<PathBuf> = Vec::new();
     for w in worktrees {
-        match claude_code::keyed(&w.session_dir, session, Some(subagent)) {
+        match claude_code::keyed(&w.session_dir, session, subagent) {
             Keyed::Found(path) => return keyed_match(path, session, subagent, sessions),
             Keyed::Absent(path) => looked.push(path),
             // Decided by the ids alone, so the first directory settles it for
@@ -347,16 +372,29 @@ fn keyed(
         }
     }
 
+    // Both causes below hold for either kind of file — a file that is not here
+    // is either gone or was never here. Which to bet on differs, and only the
+    // top-level case needs telling: the worktree-tidying half of the first
+    // cause is a subagent's story, so it gets a clause of its own rather than a
+    // sentence that has quietly become wrong for it.
+    let tidying = match subagent {
+        Some(_) => "",
+        None => {
+            " Weigh that first cause differently here, though: a top-level session ran in \
+                 a directory that OUTLIVES THE RUN, not in a worktree torn down at the end of \
+                 it, so retention or a deletion is the likely half and tidying is not."
+        }
+    };
     Err(Refusal::NoKeyedTranscript {
         detail: format!(
-            "the event names transcript agent-{subagent}.jsonl under harness_session \
-             {session}, and it is not on disk: looked at {}. Two things do this and they are \
-             not the same news. Either the transcript was PRUNED — Claude Code keeps 30 days, \
-             and a fleet that tidies its worktrees as it goes takes their encoded session \
-             directories with them — in which case look elsewhere on this machine and at your \
-             backups. Or this LEDGER CAME FROM ANOTHER MACHINE, in which case the transcript \
-             was never here, no amount of looking will find it, and this question cannot be \
-             answered on this host at all",
+            "the event names {}, and it is not on disk: looked at {}. Two things do this and \
+             they are not the same news. Either the transcript was PRUNED — Claude Code keeps \
+             30 days, and a fleet that tidies its worktrees as it goes takes their encoded \
+             session directories with them — in which case look elsewhere on this machine and \
+             at your backups. Or this LEDGER CAME FROM ANOTHER MACHINE, in which case the \
+             transcript was never here, no amount of looking will find it, and this question \
+             cannot be answered on this host at all.{tidying}",
+            named(session, subagent),
             paths(&looked)
         ),
     })
@@ -367,7 +405,7 @@ fn keyed(
 fn keyed_match(
     path: PathBuf,
     session: &str,
-    subagent: &str,
+    subagent: Option<&str>,
     sessions: &[SessionMeta],
 ) -> Result<Match, Refusal> {
     // Practically unreachable: a transcript being written when the event fired
@@ -377,43 +415,70 @@ fn keyed_match(
     let Some(meta) = sessions.iter().find(|s| s.path == path) else {
         return Err(Refusal::NoKeyedTranscript {
             detail: format!(
-                "the event names agent-{subagent}.jsonl, which IS on disk at {}, but it is \
+                "the event names {}, which IS on disk at {}, but it is \
                  not among the {} \
                  session(s) the join was offered — no connector read it. The file is there; \
                  what is missing is a reader for it, so look at the file, not for it",
+                named(session, subagent),
                 path.display(),
                 sessions.len()
             ),
         });
     };
+    // Same tier, two sentences. A reader has to be able to tell "a subagent
+    // wrote this" from "the agent that owns the session wrote this": both are
+    // identities, but they answer different questions about who acted.
+    let detail = match subagent {
+        Some(id) => format!(
+            "the event named its own transcript: harness_subagent `{id}` under \
+             harness_session `{session}` is {}, found at {} by one path join and one \
+             stat. No candidate set, no score, no tie to break — this is an identity, and \
+             the topological ladder was not consulted",
+            file_name(meta),
+            path.display()
+        ),
+        None => format!(
+            "the event named a TOP-LEVEL session transcript, not a subagent's: \
+             harness_session `{session}` with no harness_subagent is {}, the session's own \
+             file beside the subagents/ directory, found at {} by one path join and one \
+             stat. Whoever wrote this event owns that session and is nobody's subagent. No \
+             candidate set, no score, no tie to break — this is an identity, and the \
+             topological ladder was not consulted",
+            file_name(meta),
+            path.display()
+        ),
+    };
     Ok(Match {
         session: meta.clone(),
         tier: Tier::Keyed,
-        evidence: vec![Evidence::new(
-            Signal::Keyed,
-            format!(
-                "the event named its own transcript: harness_subagent `{subagent}` under \
-                 harness_session `{session}` is {}, found at {} by one path join and one \
-                 stat. No candidate set, no score, no tie to break — this is an identity, and \
-                 the topological ladder was not consulted",
-                file_name(meta),
-                path.display()
-            ),
-        )],
+        evidence: vec![Evidence::new(Signal::Keyed, detail)],
     })
+}
+
+/// What the event named, in the words the refusals have to use. The two kinds
+/// of keyed identity name different files, so a sentence that says only
+/// "agent-<id>.jsonl" is wrong for half of them.
+fn named(session: &str, subagent: Option<&str>) -> String {
+    match subagent {
+        Some(id) => format!("subagent transcript agent-{id}.jsonl under harness_session {session}"),
+        None => format!("the top-level session transcript {session}.jsonl"),
+    }
 }
 
 /// Why the keyed tier did not answer, on every answer the ladder gives.
 ///
-/// One sentence, because there is exactly one way to get here: an event with a
-/// `harness_subagent` either resolves keyed or refuses, so reaching the ladder
-/// means the field was absent. Distinguishing that from "keyed id present, file
-/// absent" is the point — different questions, and this one is not a problem.
-const NO_KEY: &str =
-    "no `harness_subagent` on this event, so nothing named a transcript: it was not written by \
-     a subagent. A top-level agent has a harness_session and is not a subagent of anything, and \
-     every orchestrator row in this repo's ledger looks exactly like this — a normal state, not \
-     a degraded one. The answer below is INFERRED by the topological ladder, not keyed";
+/// One sentence, because there is exactly one way to get here: an event with
+/// EITHER id resolves keyed or refuses, so reaching the ladder means the event
+/// carried no chain at all. It must not say "no `harness_subagent`" any more —
+/// that was true when a session with no subagent id fell through here, and
+/// since it no longer does, saying it would report a missing field to the
+/// reader of a row that never had one to miss.
+const NO_CHAIN: &str =
+    "no harness chain on this event at all — neither `harness_session` nor `harness_subagent` \
+     — so nothing named a transcript to key it to. This is a PRE-CONTRACT row, written before \
+     pact stamped the attribution chain: it is OLD, not defective, no id is missing from it, \
+     and there is nothing to go and look for. The answer below is INFERRED by the topological \
+     ladder, not keyed";
 
 /// Score every candidate and return the best one, or the reason there is none.
 ///
@@ -514,10 +579,16 @@ fn topological(
     //    always give the same answer — and recount-gwx is still open on
     //    exactly that: candidates arrive in path order, which puts a
     //    subagent transcript ahead of its parent, so an orchestrator event
-    //    systematically loses its own session. The keyed tier does NOT fix
-    //    this. It cannot even reach it: a keyed event has one candidate and
-    //    no tie, while every event gwx was measured on is an orchestrator row
-    //    with no harness_subagent, which arrives here unchanged.
+    //    systematically loses its own session. NEITHER HALF of the keyed tier
+    //    fixes this, and that includes the parent-keyed half added for exactly
+    //    that shape of row. Pre-contract rows carry no session id and are
+    //    untouched by it: every event gwx was measured on comes from the
+    //    v0.1.0 run — line 60 of this repo's ledger is one of them, an
+    //    orchestrator `acquired` with harness_session AND harness_subagent
+    //    both null — so there is nothing to key them by, they arrive here
+    //    unchanged, and they meet the path-order tie-break intact. What
+    //    parent-keying bought is this run's 13 chained session-only rows, not
+    //    gwx's 56. recount-gwx stays open.
     let mut best: Option<(f64, Match)> = None;
     for c in &overlapping {
         let (score, scored) = score(query, c, topology, &window, turns);
@@ -660,7 +731,7 @@ fn score(
     // Last, and on every scored answer: which tier this is and why it is not
     // the higher one. A reader who cannot tell an inferred answer from one that
     // had an exact key available is back to reading a bare number.
-    evidence.push(Evidence::new(Signal::Keyed, NO_KEY));
+    evidence.push(Evidence::new(Signal::Keyed, NO_CHAIN));
 
     (
         total,
@@ -935,7 +1006,7 @@ mod tests {
             [Signal::Topology, Signal::TimeOverlap, Signal::Keyed]
         );
         // Even the cleanest topological answer says it is not the keyed one.
-        assert!(m.evidence[2].detail.starts_with("no `harness_subagent`"));
+        assert!(m.evidence[2].detail.starts_with("no harness chain"));
         assert!(m.evidence[0]
             .detail
             .contains("topology A (process-per-agent)"));
@@ -1317,6 +1388,13 @@ mod tests {
     }
 
     /// Write `<session_dir>/<SESSION>/subagents/agent-<sub>.jsonl`.
+    fn top_level_file(w: &Worktree) -> PathBuf {
+        fs::create_dir_all(&w.session_dir).unwrap();
+        let p = w.session_dir.join(format!("{SESSION}.jsonl"));
+        fs::write(&p, "").unwrap();
+        p
+    }
+
     fn keyed_file(w: &Worktree, sub: &str) -> PathBuf {
         let p = w
             .session_dir
@@ -1436,16 +1514,58 @@ mod tests {
         );
     }
 
-    /// Wave 1's finding, pinned: the rest of the attribution chain does NOT
-    /// imply `harness_subagent`. An event with harness_session and no subagent
-    /// id was written by a top-level agent, which is normal — so the ladder
-    /// answers, and the answer says why the tier above it did not.
+    /// The other half of the keyed tier: an event with harness_session and no
+    /// subagent id was written by a TOP-LEVEL agent, and `<session>.jsonl`
+    /// names its transcript exactly as `agent-<id>.jsonl` names a subagent's.
     #[test]
-    fn the_chain_without_a_subagent_id_falls_through_and_says_why() {
+    fn a_session_with_no_subagent_id_is_keyed_to_the_top_level_transcript() {
         let (_td, wts) = keyed_tree();
-        // The transcript the keyed tier WOULD have found, if it were gated on
-        // harness_session. It is not: this event names no subagent.
-        keyed_file(&wts[1], SUB);
+        // Both files exist under the SECOND worktree's directory, so the loop
+        // is doing work and the choice between them is being made: the event
+        // names no subagent, so the top-level one is its transcript.
+        let sub = keyed_file(&wts[1], SUB);
+        let top = top_level_file(&wts[1]);
+        let sessions = vec![
+            // The ladder's champion, to prove it was never asked.
+            session(
+                "a",
+                Some("/r/wt/join"),
+                "2026-08-19T07:00:00Z",
+                "2026-08-19T08:00:00Z",
+            ),
+            session_at(&top, Some("/r")),
+            session_at(&sub, Some("/r")),
+        ];
+
+        let m = resolve(&keyed_query("join", None), &wts, &sessions, &none).unwrap();
+        assert_eq!(m.tier, Tier::Keyed, "a named file is not a guess");
+        assert_eq!(m.session.path, top);
+        assert_ne!(m.session.path, sub, "it named the session, not a subagent");
+        assert_eq!(m.tier.confidence(), None, "an identity has no score");
+        assert_eq!(signals(&m), [Signal::Keyed]);
+
+        // Same tier as a subagent hit, deliberately different words: the reader
+        // has to be able to tell who acted.
+        let d = &m.evidence[0].detail;
+        assert!(d.contains("TOP-LEVEL session transcript"), "{d}");
+        assert!(d.contains("nobody's subagent"), "{d}");
+        assert!(d.contains(&format!("{SESSION}.jsonl")), "{d}");
+        assert!(!d.contains("agent-"), "{d}");
+        assert!(
+            d.contains("the topological ladder was not consulted"),
+            "{d}"
+        );
+    }
+
+    /// The same refusal as an absent subagent file, in words that fit a
+    /// top-level one: the two causes still hold, but the worktree-tidying half
+    /// of the first is a subagent's story and must not be told as if it were
+    /// this row's.
+    #[test]
+    fn an_absent_top_level_transcript_refuses_in_its_own_words() {
+        let (_td, wts) = keyed_tree();
+        // A session that WOULD have won topologically: the keyed tier refuses
+        // rather than quietly falling back to a guess, for this half too.
         let sessions = vec![session(
             "a",
             Some("/r/wt/join"),
@@ -1453,20 +1573,70 @@ mod tests {
             "2026-08-19T08:00:00Z",
         )];
 
-        let m = resolve(&keyed_query("join", None), &wts, &sessions, &none).unwrap();
+        let err = resolve(&keyed_query("join", None), &wts, &sessions, &none).unwrap_err();
+        assert_eq!(err.reason(), "no keyed transcript");
+        let d = err.detail();
+        assert!(d.contains(&format!("{SESSION}.jsonl")), "{d}");
+        assert!(!d.contains("agent-"), "{d}");
+        assert!(d.contains("-r-main") && d.contains("-r-join"), "{d}");
+        // The two causes, unchanged, plus the clause that keeps the first one
+        // from lying to a top-level reader.
+        assert!(d.contains("PRUNED"), "{d}");
+        assert!(d.contains("LEDGER CAME FROM ANOTHER MACHINE"), "{d}");
+        assert!(d.contains("OUTLIVES THE RUN"), "{d}");
+    }
+
+    /// The third sentence, and the one most easily broken. A v0.1.0-era row
+    /// carries neither id. It is OLD, not defective, and the evidence must not
+    /// tell its reader that a subagent id was expected and missing.
+    #[test]
+    fn a_row_with_no_chain_at_all_is_old_rather_than_missing_an_id() {
+        let (_td, wts) = keyed_tree();
+        // Both keyed files are on disk. Neither is reachable: a pre-contract
+        // row names nothing, so there is nothing to join.
+        keyed_file(&wts[1], SUB);
+        top_level_file(&wts[1]);
+        let sessions = vec![session(
+            "a",
+            Some("/r/wt/join"),
+            "2026-08-19T07:00:00Z",
+            "2026-08-19T08:00:00Z",
+        )];
+
+        let m = resolve(&query("join", Some("join")), &wts, &sessions, &none).unwrap();
         assert_eq!(
             m.tier,
             Tier::Topological(Confidence::new(TOPOLOGY_DISCRIMINATING + OVERLAP))
         );
-        let why = &m.evidence[m.evidence.len() - 1];
+        let why = m.evidence.last().unwrap();
         assert_eq!(why.signal, Signal::Keyed);
-        assert!(why.detail.contains("no `harness_subagent` on this event"));
-        assert!(why.detail.contains("not written by a subagent"));
-        assert!(why.detail.contains("normal state, not"));
+        assert!(why.detail.contains("no harness chain on this event at all"));
+        assert!(why.detail.contains("PRE-CONTRACT"));
+        assert!(why.detail.contains("OLD, not defective"));
         assert!(why.detail.contains("INFERRED"));
-        // The distinction that must not collapse: this is not the sentence an
-        // absent keyed file gets.
+        // Not the parent-keyed story: this row is not a top-level agent's, it
+        // predates the field that would say so.
+        assert!(!why.detail.contains("not written by a subagent"));
+        assert!(!why.detail.contains("TOP-LEVEL"));
+        // And not the absent-file story: nothing here has gone missing.
         assert!(!why.detail.contains("PRUNED"));
+    }
+
+    /// Both keyed halves could apply and the subagent id wins: it names the
+    /// narrower file, and the parent session is not who wrote the event.
+    #[test]
+    fn a_subagent_id_outranks_the_top_level_file_when_both_are_on_disk() {
+        let (_td, wts) = keyed_tree();
+        let sub = keyed_file(&wts[0], SUB);
+        let top = top_level_file(&wts[0]);
+        let sessions = vec![session_at(&top, Some("/r")), session_at(&sub, Some("/r"))];
+
+        let m = resolve(&keyed_query("join", Some(SUB)), &wts, &sessions, &none).unwrap();
+        assert_eq!(m.tier, Tier::Keyed);
+        assert_eq!(m.session.path, sub);
+        let d = &m.evidence[0].detail;
+        assert!(d.contains(&format!("harness_subagent `{SUB}`")), "{d}");
+        assert!(!d.contains("TOP-LEVEL"), "{d}");
     }
 
     /// The one that matters: the two tiers disagree, and keyed wins.
