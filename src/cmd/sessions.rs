@@ -29,7 +29,7 @@
 //! know.
 //!
 //! ```text
-//! { "command": "sessions", "schema": 1,
+//! { "command": "sessions", "schema": 2,
 //!   "repo": "/abs/path",                          // canonical
 //!   "window": { "since": <rfc3339|null>, "until": <rfc3339|null> },
 //!   "session_dirs": ["/home/u/.claude/projects/-abs-path", ...],
@@ -43,24 +43,56 @@
 //!       "turn_count": 128, "parse_failures": 2, "declined": 12,
 //!       "worktree": <name|null>,                  // null: the cwd did not say
 //!       "repo_match": "cwd" | "session_dir",
-//!       "fleet_identity_guess": {
+//!       "fleet_identity": {
 //!           "agent": <name|null>,                 // null: we cannot tell
-//!           "confidence": 0.90,
+//!           "tier": "keyed",       "confidence": null,     // the ledger said so
+//!           "tier": "topological", "confidence": 0.90,     // ...or we inferred it
 //!           "evidence": [ { "signal": "...", "detail": "..." }, ... ]
 //!       } } ],
 //!   "warnings": ["worktree `gone` is listed by git but its directory is gone"] }
 //! ```
 //!
-//! # A guess is shaped like a guess
+//! # A guess is shaped like a guess, and a fact is not shaped like one
 //!
-//! Nothing in this output states a fleet identity as a fact. The key is named
-//! `fleet_identity_guess`; its `agent` is nullable and is never printed
-//! without a `confidence` beside it; its `evidence` is never empty — when
-//! `agent` is null the evidence says *why* we could not tell, which is itself
-//! the answer an auditor needs. The digest spells the same thing in words: "a
-//! GUESS (confidence 0.90)", or "unknown — no guess".
+//! Most of this output is inference and says so. Some of it is not, and that
+//! difference is the only thing here worth getting right.
 //!
-//! The two signals are the ones this tree can actually support, and
+//! **When the ledger names the transcript.** pact 0.11.0 stamps
+//! `harness_subagent` on every event it writes: the id of the transcript the
+//! acting agent was running in. A transcript whose id appears there is not
+//! being guessed at — `.pact/events.jsonl` line N *states* that agent `X` ran
+//! `agent-<id>.jsonl`, and the answer is [`Tier::Keyed`], evidenced by that
+//! line number. No score, and the guess machinery below is not consulted at
+//! all: this is [`join`](crate::join)'s two-tier rule, applied to the same
+//! ledger from the transcript's side. The id comes from the filename stem,
+//! which §3.1 measured equal to the file's own `agentId` in 604 of 604 files.
+//!
+//! **When it does not** — which is most of the corpus, because 0.10.7 wrote no
+//! chain and no later pact can go back and key those rows — the two inference
+//! signals below run exactly as they always have and the answer stays
+//! `topological` with its number.
+//!
+//! **Why the key was renamed, and the schema bumped.** `fleet_identity_guess`
+//! was an honest name while everything under it was a guess; carrying a stated
+//! fact under a key called `guess` is the same category error inverted, and
+//! this file's whole design is that the shape of the answer tells you what kind
+//! of answer it is. So the key is `fleet_identity`, the tier says how it was
+//! reached, and `schema` moves 1 → 2 — which is precisely what the envelope's
+//! version exists for.
+//!
+//! The alternative — keep the old key for inferred rows and add a second one
+//! for keyed rows — was rejected: an existing `jq '.fleet_identity_guess'`
+//! reader would go on working and silently drop exactly the rows whose identity
+//! is certain, which is a biased sample of the audit and the worst of the three
+//! failure modes. Renaming breaks every row the same way, at a version number a
+//! reader can test. Inside, `confidence` follows [`Tier`]'s own rule: written,
+//! and explicitly `null` for a keyed answer, so a script thresholding it fails
+//! the comparison instead of quietly ranking an identity against a guess.
+//!
+//! One thing the rename does not change: `agent` is still nullable, `evidence`
+//! is still never empty, and when `agent` is null the evidence says *why*.
+//!
+//! The two inference signals are the ones this tree can actually support, and
 //! `docs/format-notes.md` §4.3 measured both:
 //!
 //! 1. **Topology** — the session's `cwd` resolved through
@@ -82,6 +114,10 @@
 //! [`Evidence`] to the same vector and one arm to the arithmetic in
 //! [`guess_identity`]. The output type does not move.
 //!
+//! The digest says the same three things in words: "`X` — KNOWN, the ledger
+//! names this transcript", "probably `X` — a GUESS (confidence 0.90)", or
+//! "unknown — no guess".
+//!
 //! # One session, one connector
 //!
 //! Discovery goes through [`connector::discover_all`], not over the registry
@@ -96,7 +132,7 @@
 //! not a warning wearing an error's clothes: recount runs from repos that have
 //! never seen a coding agent, and "none" is the honest result.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -108,11 +144,16 @@ use serde::Serialize;
 use crate::cli::SessionsArgs;
 use crate::cmd::EXIT_OK;
 use crate::connector::{self, Connector};
-use crate::model::{Confidence, Evidence, SessionMeta, Signal, TimeWindow};
+use crate::model::{Confidence, Evidence, SessionMeta, Signal, Tier, TimeWindow};
+use crate::pact_events::{self, Events};
 use crate::worktree::{self, Worktree};
 
 /// Bumped only when a field leaves or changes meaning. See the module doc.
-const SCHEMA: u32 = 1;
+///
+/// 2: `fleet_identity_guess` became `fleet_identity` and its `confidence`
+/// became the flattened [`Tier`] — a field left and a field changed meaning,
+/// which is both halves of the rule at once.
+const SCHEMA: u32 = 2;
 
 pub fn run(args: &SessionsArgs, json: bool) -> Result<u8> {
     let window = args.window.window();
@@ -162,13 +203,18 @@ impl RepoMatch {
     }
 }
 
-/// An inference about which fleet agent ran a session. Read the module doc:
-/// every field here exists to stop this being mistaken for a record.
+/// Which fleet agent ran a session, and on what footing. Read the module doc:
+/// [`Self::tier`] is the field that says whether this is a record or an
+/// inference, and it is not optional to look at.
 #[derive(Debug, Clone, Serialize)]
-pub struct FleetGuess {
-    /// The identity we think ran this session, or `None` when we cannot tell.
+pub struct FleetIdentity {
+    /// The identity, or `None` when we cannot tell. Never `None` on a keyed
+    /// answer — the ledger named it.
     pub agent: Option<String>,
-    pub confidence: Confidence,
+    /// `keyed` with a `null` confidence, or `topological` with the score.
+    /// Flattened, so the wire shape is the two fields [`Tier`] documents.
+    #[serde(flatten)]
+    pub tier: Tier,
     /// Never empty. When `agent` is `None` this is why.
     pub evidence: Vec<Evidence>,
 }
@@ -190,7 +236,7 @@ pub struct SessionEntry {
     /// The checkout the `cwd` resolved into, `None` when the cwd did not say.
     pub worktree: Option<String>,
     pub repo_match: RepoMatch,
-    pub fleet_identity_guess: FleetGuess,
+    pub fleet_identity: FleetIdentity,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -231,6 +277,22 @@ fn collect(
         connector::discover_all(connectors, dirs, window)
     };
 
+    // The ledger, once, before the loop: 216 lines on the repo this was
+    // written in, and every session is asked the same question of it.
+    let mut warnings = Vec::new();
+    // A `.pact/` that exists and cannot be read is not fatal — every identity
+    // below simply falls back to the guess — but silence here would look
+    // exactly like a fleet that never keyed anything.
+    let events = pact_events::read(&pact_events::events_path(repo)).unwrap_or_else(|e| {
+        warnings.push(format!(
+            "could not read {}: {e:#}. Every identity below is a guess, including any the \
+             ledger could have stated outright",
+            pact_events::events_path(repo).display()
+        ));
+        Events::default()
+    });
+    let named = ledger_identities(&events);
+
     let mut excluded_by_cwd = 0;
     let mut sessions: Vec<SessionEntry> = Vec::new();
     for meta in &discovered {
@@ -239,7 +301,7 @@ fn collect(
             continue;
         };
         sessions.push(SessionEntry {
-            fleet_identity_guess: guess_identity(meta, worktrees, worktree, matched_cwd.as_deref()),
+            fleet_identity: identify(meta, &named, worktrees, worktree, matched_cwd.as_deref()),
             path: meta.path.clone(),
             connector: meta.connector.clone(),
             cwd: meta.cwd.clone(),
@@ -270,18 +332,52 @@ fn collect(
         discovered: discovered.len(),
         excluded_by_cwd,
         sessions,
-        warnings: worktrees
-            .iter()
-            .filter(|w| !w.alive)
-            .map(|w| {
+        warnings: {
+            warnings.extend(worktrees.iter().filter(|w| !w.alive).map(|w| {
                 format!(
                     "worktree `{}` is listed by git but {} is gone from disk; its transcripts outlive it",
                     w.name,
                     w.path.display()
                 )
-            })
-            .collect(),
+            }));
+            warnings
+        },
     }
+}
+
+/// What the repo's ledger STATES about the transcripts it names, keyed by
+/// `harness_subagent`.
+///
+/// Only `harness_subagent` gates this, never `harness.is_some()` as a proxy:
+/// a top-level agent's 0.11.0 row carries the harness, the session, the model
+/// and the branch and names no transcript, because it is not a subagent of
+/// anything. Every orchestrator row in this repo's ledger looks like that.
+///
+/// The agents are a set, not the first name seen. One transcript ran one
+/// agent, so a second name for the same id is a ledger that contradicts
+/// itself, and [`identify`] must not read a contradiction as a fact.
+fn ledger_identities(events: &Events) -> BTreeMap<&str, Named<'_>> {
+    let mut out: BTreeMap<&str, Named> = BTreeMap::new();
+    for e in &events.events {
+        let Some(id) = e.harness_subagent.as_deref() else {
+            continue;
+        };
+        let named = out.entry(id).or_insert(Named {
+            agents: BTreeSet::new(),
+            line: e.line,
+        });
+        named.agents.insert(e.agent.as_str());
+    }
+    out
+}
+
+/// One transcript id, as the ledger describes it.
+struct Named<'a> {
+    /// Every distinct `agent` that wrote an event from this transcript. One,
+    /// unless the ledger contradicts itself.
+    agents: BTreeSet<&'a str>,
+    /// The first line that named it — the one a human is sent to read.
+    line: usize,
 }
 
 /// Does this session belong to the repo, and to which checkout?
@@ -343,12 +439,90 @@ fn all_cwds(meta: &SessionMeta) -> Vec<PathBuf> {
     }
 }
 
+/// The identity of the agent that ran this session: stated, if the ledger
+/// states it, and inferred otherwise.
+///
+/// The two tiers do not mix. A transcript the ledger names gets one
+/// [`Signal::Keyed`] evidence line and nothing else — the same rule
+/// [`crate::join`] applies from the event's side, for the same reason: there
+/// is no candidate set and no tie to break, so weighing topology and a byte
+/// scan beside a statement would invite a reader to compare them. It is also
+/// the cheaper path, since the keyed answer never opens the transcript.
+///
+/// A ledger that names two different agents for one transcript is not a
+/// statement of identity. Those fall through to the guess, carrying one
+/// [`Signal::Keyed`] line that says the ledger contradicted itself — because
+/// "the ledger disagrees with the ledger" is news, and demoting it to silence
+/// would present the inference as if nothing else had been tried.
+fn identify(
+    meta: &SessionMeta,
+    named: &BTreeMap<&str, Named<'_>>,
+    worktrees: &[Worktree],
+    worktree: Option<&Worktree>,
+    cwd: Option<&Path>,
+) -> FleetIdentity {
+    let found = transcript_id(&meta.path).and_then(|id| named.get(id).map(|n| (id, n)));
+    match found {
+        Some((id, n)) if n.agents.len() == 1 => {
+            let agent = n.agents.iter().next().expect("len 1");
+            FleetIdentity {
+                agent: Some((*agent).to_string()),
+                tier: Tier::Keyed,
+                evidence: vec![Evidence::new(
+                    Signal::Keyed,
+                    format!(
+                        "`.pact/events.jsonl` line {} states that agent `{agent}` acted from \
+                         harness_subagent `{id}`, which is this file: agent-{id}.jsonl. The \
+                         ledger names the transcript, so this identity is not inferred and \
+                         carries no confidence — read the line and see for yourself",
+                        n.line
+                    ),
+                )],
+            }
+        }
+        contradicted => {
+            let mut guess = guess_identity(meta, worktrees, worktree, cwd);
+            if let Some((id, n)) = contradicted {
+                guess.evidence.insert(
+                    0,
+                    Evidence::new(
+                        Signal::Keyed,
+                        format!(
+                        "`.pact/events.jsonl` names {} different agents ({}) for harness_subagent \
+                         `{id}`, first at line {}. One transcript ran one agent, so this is the \
+                         ledger contradicting itself and not a statement of identity; the guess \
+                         below stands in for it, and the thing to look at is the ledger",
+                        n.agents.len(),
+                        n.agents.iter().copied().collect::<Vec<_>>().join(", "),
+                        n.line
+                    ),
+                    ),
+                );
+            }
+            guess
+        }
+    }
+}
+
+/// The transcript's own id: the `<id>` of `agent-<id>.jsonl`, which §3.1
+/// measured equal to the file's `agentId` in 604 of 604 subagent files.
+///
+/// The filename, not a re-read of the file: this runs for every session and
+/// the ledger's key is the same string either way. `None` for anything not
+/// named that way — a top-level `<uuid>.jsonl`, or any other connector's file
+/// — which is the same answer as "the ledger does not name it".
+fn transcript_id(path: &Path) -> Option<&str> {
+    path.file_stem()?.to_str()?.strip_prefix("agent-")
+}
+
 /// The literal `PACT_AGENT=` assignment, which is how a pact agent is told who
 /// it is.
 const PACT_AGENT: &str = "PACT_AGENT=";
 
-/// Which fleet agent ran this session? Read the module doc first — this is an
-/// inference and its return type says so.
+/// Which fleet agent ran this session, when nothing STATED it? Read the module
+/// doc first — this is an inference, it always returns
+/// [`Tier::Topological`], and its caller is [`identify`], which tries the
+/// ledger before it gets here.
 ///
 /// Both signals always contribute exactly one [`Evidence`], including when
 /// they name no one — which is what keeps `evidence` non-empty even for a
@@ -363,7 +537,7 @@ fn guess_identity(
     worktrees: &[Worktree],
     worktree: Option<&Worktree>,
     cwd: Option<&Path>,
-) -> FleetGuess {
+) -> FleetIdentity {
     let mut evidence = Vec::new();
 
     // A session that matched on a cwd other than its most frequent one would
@@ -458,9 +632,9 @@ fn guess_identity(
         (None, Some(_)) => (from_cwd.clone(), 0.50),
         (None, None) => (None, 0.0),
     };
-    FleetGuess {
+    FleetIdentity {
         agent,
-        confidence: Confidence::new(confidence),
+        tier: Tier::Topological(Confidence::new(confidence)),
         evidence,
     }
 }
@@ -574,14 +748,23 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
         }
         writeln!(w, "    {}", facts.join(" · "))?;
 
-        let g = &s.fleet_identity_guess;
-        match &g.agent {
-            Some(a) => writeln!(
+        // Three readings, and the first one is not a stronger version of the
+        // second: "KNOWN" carries no number because there is none, and the
+        // line of the ledger that says so is the evidence printed under it.
+        let g = &s.fleet_identity;
+        match (&g.agent, g.tier) {
+            (Some(a), Tier::Keyed) => writeln!(
                 w,
-                "    fleet identity: probably `{a}` — a GUESS (confidence {})",
-                g.confidence
+                "    fleet identity: `{a}` — KNOWN, the ledger names this transcript"
             )?,
-            None => writeln!(w, "    fleet identity: unknown — no guess")?,
+            (Some(a), Tier::Topological(c)) => writeln!(
+                w,
+                "    fleet identity: probably `{a}` — a GUESS (confidence {c})"
+            )?,
+            // A keyed answer always has an agent; `Keyed` with none would be a
+            // ledger row that named a transcript and no one, which pact cannot
+            // write. Printed as the guess it is not, rather than unwrapped.
+            (None, _) => writeln!(w, "    fleet identity: unknown — no guess")?,
         }
         for e in &g.evidence {
             writeln!(w, "      · {}: {}", signal_words(e.signal), e.detail)?;
@@ -756,7 +939,7 @@ mod tests {
 
         let doc = json_of(&report);
         assert_eq!(doc["command"], "sessions");
-        assert_eq!(doc["schema"], 1);
+        assert_eq!(doc["schema"], 2);
         assert_eq!(doc["repo"], "/r");
         assert_eq!(
             doc["window"],
@@ -778,7 +961,7 @@ mod tests {
             "declined",
             "worktree",
             "repo_match",
-            "fleet_identity_guess",
+            "fleet_identity",
         ] {
             assert!(
                 !s[key].is_null() || matches!(key, "cwd" | "worktree"),
@@ -793,8 +976,9 @@ mod tests {
         assert_eq!(s["worktree"], Value::Null);
         assert_eq!(s["repo_match"], "session_dir");
 
-        let g = &s["fleet_identity_guess"];
+        let g = &s["fleet_identity"];
         assert_eq!(g["agent"], "cmdsessions");
+        assert_eq!(g["tier"], "topological");
         assert_eq!(g["confidence"], 0.7);
         assert!(g["evidence"].as_array().is_some_and(|e| !e.is_empty()));
         assert_eq!(g["evidence"][1]["signal"], "transcript_mention");
@@ -951,10 +1135,13 @@ mod tests {
         let plain = by_path(&inside);
         assert_eq!(plain.repo_match, RepoMatch::Cwd);
         assert_eq!(plain.worktree.as_deref(), Some("main"));
-        assert_eq!(plain.fleet_identity_guess.agent, None);
-        assert_eq!(plain.fleet_identity_guess.confidence.value(), 0.0);
+        assert_eq!(plain.fleet_identity.agent, None);
         assert_eq!(
-            plain.fleet_identity_guess.evidence.len(),
+            plain.fleet_identity.tier,
+            Tier::Topological(Confidence::new(0.0))
+        );
+        assert_eq!(
+            plain.fleet_identity.evidence.len(),
             2,
             "unknown is an answer with reasons, not a shrug"
         );
@@ -962,22 +1149,25 @@ mod tests {
         // Both signals agree — the strongest this ever gets, and still a guess.
         let strong = by_path(&named);
         assert_eq!(strong.worktree.as_deref(), Some("cmdsessions"));
+        assert_eq!(strong.fleet_identity.agent.as_deref(), Some("cmdsessions"));
         assert_eq!(
-            strong.fleet_identity_guess.agent.as_deref(),
-            Some("cmdsessions")
+            strong.fleet_identity.tier,
+            Tier::Topological(Confidence::new(0.90))
         );
-        assert_eq!(strong.fleet_identity_guess.confidence.value(), 0.90);
 
         // Two names in one transcript: the worktree breaks the tie, at a
         // visibly lower confidence.
         let ambiguous = by_path(&quoting);
         assert_eq!(
-            ambiguous.fleet_identity_guess.agent.as_deref(),
+            ambiguous.fleet_identity.agent.as_deref(),
             Some("cmdsessions")
         );
-        assert_eq!(ambiguous.fleet_identity_guess.confidence.value(), 0.80);
+        assert_eq!(
+            ambiguous.fleet_identity.tier,
+            Tier::Topological(Confidence::new(0.80))
+        );
         assert!(ambiguous
-            .fleet_identity_guess
+            .fleet_identity
             .evidence
             .iter()
             .any(|e| e.detail.contains("names 2 identities")));
@@ -1045,7 +1235,7 @@ mod tests {
         );
         // …and the topology evidence quotes the cwd that actually resolved, so
         // the entry cannot be read as a contradiction.
-        let topology = &s.fleet_identity_guess.evidence[0].detail;
+        let topology = &s.fleet_identity.evidence[0].detail;
         assert!(topology.contains("/r/wt/a is worktree `a`"), "{topology}");
         assert!(
             topology.contains("most frequent cwd is /other/repo"),
@@ -1069,5 +1259,218 @@ mod tests {
         );
         // A file that is not there names no one, and does not fail.
         assert!(pact_agent_names(&td.path().join("nope")).is_empty());
+    }
+
+    /// `<repo>/.pact/events.jsonl`, written by hand: `event(line, agent,
+    /// subagent)` produces the fields `pact_events` reads and nothing else,
+    /// which is the tolerance contract from the other side.
+    fn write_ledger(repo: &Path, rows: &[(&str, Option<&str>)]) {
+        fs::create_dir_all(repo.join(".pact")).unwrap();
+        let body: String = rows
+            .iter()
+            .map(|(agent, subagent)| {
+                let sub = match subagent {
+                    Some(s) => format!(r#","harness_subagent":"{s}""#),
+                    None => String::new(),
+                };
+                format!(
+                    r#"{{"at":"2026-08-19T07:00:00Z","agent":"{agent}","invoked_from":"main",
+                       "harness":"claude-code","harness_session":"cd7c75eb"{sub}}}"#
+                )
+                .replace('\n', "")
+                    + "\n"
+            })
+            .collect();
+        fs::write(repo.join(".pact").join("events.jsonl"), body).unwrap();
+    }
+
+    /// The bead: where the ledger names the transcript, the identity is KNOWN
+    /// and the event that proves it is named. Where it does not — which is
+    /// most of any real corpus — nothing about the guess changes.
+    #[test]
+    fn a_transcript_the_ledger_names_is_known_not_guessed() {
+        let td = TempDir::new().unwrap();
+        let repo = td.path().join("repo");
+        let dir = td.path().join("sessions");
+        // Line 2 names this transcript; line 1 is a top-level row with no
+        // subagent, which must not key anything.
+        write_ledger(
+            &repo,
+            &[("orchestrator", None), ("sessionschain", Some("aac2cd5f"))],
+        );
+        // The keyed file even *mentions* another identity: the ledger's
+        // statement must win outright, not be weighed against a byte scan.
+        let keyed = write_session(
+            &dir,
+            "agent-aac2cd5f.jsonl",
+            &[("2026-08-19T07:00:00Z", "quoting PACT_AGENT=someone-else")],
+        );
+        let guessed = write_session(
+            &dir,
+            "agent-deadbeef.jsonl",
+            &[("2026-08-19T07:00:00Z", "export PACT_AGENT=cmdsessions")],
+        );
+
+        let worktrees = [wt(repo.to_str().unwrap(), "main")];
+        let r = collect(
+            &only_generic(),
+            &repo,
+            &worktrees,
+            std::slice::from_ref(&dir),
+            &TimeWindow::default(),
+        );
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        let by_path = |p: &Path| r.sessions.iter().find(|s| s.path == p).expect("kept");
+
+        let known = &by_path(&keyed).fleet_identity;
+        assert_eq!(known.agent.as_deref(), Some("sessionschain"));
+        assert_eq!(known.tier, Tier::Keyed);
+        assert_eq!(
+            known.evidence.len(),
+            1,
+            "a statement is not weighed against the signals it replaces: {:?}",
+            known.evidence
+        );
+        assert_eq!(known.evidence[0].signal, Signal::Keyed);
+        assert!(
+            known.evidence[0].detail.contains("line 2"),
+            "the event that proves it is named: {}",
+            known.evidence[0].detail
+        );
+
+        // The un-keyed neighbour is untouched: same agent, same score, same
+        // two pieces of evidence it had before the ledger was ever read.
+        let guess = &by_path(&guessed).fleet_identity;
+        assert_eq!(guess.agent.as_deref(), Some("cmdsessions"));
+        assert_eq!(guess.tier, Tier::Topological(Confidence::new(0.70)));
+        assert_eq!(guess.evidence.len(), 2);
+
+        // The wire shape, both tiers, including the explicit null.
+        let doc = json_of(&r);
+        let of = |p: &Path| {
+            doc["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["path"] == p.to_str().unwrap())
+                .unwrap()["fleet_identity"]
+                .clone()
+        };
+        assert_eq!(of(&keyed)["tier"], "keyed");
+        assert_eq!(of(&keyed)["confidence"], Value::Null);
+        assert_eq!(of(&guessed)["tier"], "topological");
+        assert_eq!(of(&guessed)["confidence"], 0.7);
+
+        // And the digest does not read like a stronger guess.
+        let mut out = Vec::new();
+        digest(&r, &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains(
+                "fleet identity: `sessionschain` — KNOWN, the ledger names this transcript"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("probably `cmdsessions` — a GUESS (confidence 0.70)"),
+            "{text}"
+        );
+        assert!(!text.contains("KNOWN (confidence"), "{text}");
+    }
+
+    /// Two agents against one transcript id is the ledger contradicting
+    /// itself. That is not a statement of identity, so the guess stands — and
+    /// the contradiction is reported rather than swallowed.
+    #[test]
+    fn a_ledger_that_names_two_agents_for_one_transcript_states_nothing() {
+        let td = TempDir::new().unwrap();
+        let repo = td.path().join("repo");
+        let dir = td.path().join("sessions");
+        write_ledger(
+            &repo,
+            &[
+                ("sessionschain", Some("aac2cd5f")),
+                ("tier", Some("aac2cd5f")),
+            ],
+        );
+        let path = write_session(
+            &dir,
+            "agent-aac2cd5f.jsonl",
+            &[("2026-08-19T07:00:00Z", "export PACT_AGENT=cmdsessions")],
+        );
+
+        let worktrees = [wt(repo.to_str().unwrap(), "main")];
+        let r = collect(
+            &only_generic(),
+            &repo,
+            &worktrees,
+            &[dir],
+            &TimeWindow::default(),
+        );
+        let id = &r
+            .sessions
+            .iter()
+            .find(|s| s.path == path)
+            .unwrap()
+            .fleet_identity;
+        assert_eq!(id.tier, Tier::Topological(Confidence::new(0.70)));
+        assert_eq!(id.agent.as_deref(), Some("cmdsessions"), "the guess stands");
+        assert_eq!(id.evidence.len(), 3, "the contradiction is said out loud");
+        assert_eq!(id.evidence[0].signal, Signal::Keyed);
+        assert!(
+            id.evidence[0]
+                .detail
+                .contains("2 different agents (sessionschain, tier)"),
+            "{}",
+            id.evidence[0].detail
+        );
+    }
+
+    /// A `.pact/events.jsonl` that exists and cannot be read is a warning and
+    /// a corpus of guesses, never a failed command: the sessions are still the
+    /// answer, they are just all inferred.
+    #[test]
+    fn an_unreadable_ledger_is_a_warning_not_a_failure() {
+        let td = TempDir::new().unwrap();
+        let repo = td.path().join("repo");
+        // A directory where the file should be: readable path, unreadable file.
+        fs::create_dir_all(repo.join(".pact").join("events.jsonl")).unwrap();
+        let dir = td.path().join("sessions");
+        write_session(
+            &dir,
+            "agent-aac2cd5f.jsonl",
+            &[("2026-08-19T07:00:00Z", "export PACT_AGENT=cmdsessions")],
+        );
+
+        let r = collect(
+            &only_generic(),
+            &repo,
+            &[wt(repo.to_str().unwrap(), "main")],
+            &[dir],
+            &TimeWindow::default(),
+        );
+        assert_eq!(r.sessions.len(), 1);
+        assert_eq!(
+            r.sessions[0].fleet_identity.tier,
+            Tier::Topological(Confidence::new(0.70))
+        );
+        assert_eq!(r.warnings.len(), 1);
+        assert!(
+            r.warnings[0].contains("Every identity below is a guess"),
+            "{:?}",
+            r.warnings
+        );
+    }
+
+    #[test]
+    fn a_transcript_id_is_the_filename_and_nothing_is_read() {
+        assert_eq!(
+            transcript_id(Path::new("/p/<s>/subagents/agent-a1ded78e.jsonl")),
+            Some("a1ded78e")
+        );
+        // A top-level session is not named that way, and neither is anything
+        // else: the same answer as a ledger that does not name it.
+        assert_eq!(transcript_id(Path::new("/p/cd7c75eb-c39f.jsonl")), None);
+        assert_eq!(transcript_id(Path::new("/p")), None);
     }
 }
