@@ -18,7 +18,9 @@ Your job is not to describe the code. It is to keep three promises true.
 
 The README is the only document uniquely good at explaining why recount exists,
 why it is shaped the way it is, and what it deliberately refuses to do. That is
-all it should contain. Keep it in the neighbourhood of 200 lines.
+all it should contain. Keep it in the neighbourhood of 150 lines, and resist
+growing it back: every section that left it did so because a reader came to the
+README for *why* and had to wade through *how*.
 
 The README must NOT contain: command syntax, flag lists, exit-code tables,
 installation steps, sample terminal output, JSON shapes, or anything a reader
@@ -27,8 +29,11 @@ would come back to look up rather than read once. Every one of those belongs in
 README, you are writing in the wrong file.
 
 The README SHOULD contain: the problem, why each design choice is shaped as it
-is, the non-goals with their reasoning, where the tool is weak, provenance for
-how the design was arrived at, and the documentation index.
+is, the non-goals with their reasoning (the spec requires that section in the
+README), one short honest paragraph on where the tool is weak, one paragraph of
+provenance, and links to `docs/quickstart.md` and the `docs/README.md` index.
+The detail behind the last three lives in `docs/limitations.md` and
+`docs/architecture.md`.
 
 **2. The documentation and the binary never disagree.**
 
@@ -47,10 +52,11 @@ design claim is that a scored answer with its evidence beats a confident bare
 one. Documentation that quietly rounds a limitation up to a feature commits the
 exact error the tool was built to prevent.
 
-So: `docs/join.md` and the README's weakness section must keep saying that the
-join's primary key **cannot discriminate in a subagent fleet**, that the tool
-produces a *wrong* confident-looking answer on this repository's own ledger, and
-that its own evidence line is what reveals it. If a change makes one of those
+So: `docs/join.md`, `docs/limitations.md` and the README's weakness paragraph
+must keep saying that the join's primary key **cannot discriminate in a subagent
+fleet**, that the tool returns the *wrong* transcript on this repository's own
+ledger (once at a confident score, now as a lead), and that its own evidence
+line is what reveals it. If a change makes one of those
 statements untrue, prove it and rewrite it. Never soften one because it reads
 badly.
 
@@ -58,29 +64,35 @@ badly.
 
 | File | Owns |
 |---|---|
-| `README.md` | why recount exists, why each choice is shaped this way, non-goals, where it is weak, provenance, the index |
+| `README.md` | why recount exists, why each choice is shaped this way, non-goals, a short weakness paragraph, one paragraph of provenance, links to the quickstart and the index |
+| `docs/README.md` | the documentation index, grouped by what the reader is trying to do |
+| `docs/quickstart.md` | the five-command path from an audit finding to a transcript, and how to read a verdict |
 | `docs/spec.md` | **the contract, treated as frozen. Do not edit it.** See below. |
 | `docs/install.md` | installing, the mise tasks, shell completions, `--version` |
 | `docs/cli.md` | every command, flag, exit code and `--json` shape — the contract |
+| `docs/limitations.md` | where the join is weak or wrong, why, and what a fleet can do about it |
+| `docs/architecture.md` | the module map, how one query flows, departures from the spec, where the design came from |
 | `docs/join.md` | the topological key, the score ladder, evidence, the two refusals, topology A vs B |
 | `docs/connectors.md` | the two connectors, the four trait methods, the claim rule, the tolerance contract, what each declines |
 | `docs/format-notes.md` | the reverse-engineered `~/.claude` layout, with its drift warning |
 | `docs/performance.md` | the mtime prune, the two ceilings, measured numbers, the sidecar deferral |
 | `docs/development.md` | build, test, the gates and why each exists, the agents |
 | `docs/worked-example.md` | one real finding replayed end to end, including the tool being wrong |
+| `docs/session-learnings.md` | a dated study of four other repositories' ledgers, and what recount got wrong on them |
 
 New material goes in the page that already owns that surface. Create a new page
 only when a subject has no owner and is too large to host — and add it to the
-README index and to this table in the same change, or the next curator will not
+`docs/README.md` index and to this table in the same change, or the next curator will not
 know it exists.
 
 ### `docs/spec.md` is frozen
 
 It was committed verbatim as the contract a 26-agent fleet built against, and
-the README calls it the contract where "the quote wins". **Do not edit it**, not
+the docs call it the frozen contract. **Do not edit it**, not
 even to fix something it got wrong. Where the code deliberately departs from it,
-that belongs in the README's deviations section — which is where the
-`discover(dirs, window)` signature and the `completion` command already live.
+that belongs in "Departures from the spec" in `docs/architecture.md` — which is
+where the `discover(dirs, window)` signature, the `completion` and `testify`
+commands, and the keyed tier already live.
 Adding a third deviation is normal; editing the spec to hide one is not.
 
 The freeze is a rule for *you*, not a claim about the file's history: the

@@ -24,9 +24,10 @@ last turn and says nothing about the first. Therefore:
 
 A naive symmetric prune looks tidier and silently loses hits. That is why the
 asymmetry is written down here and in the module doc rather than left to the
-reader of an `if`. An unbounded window prunes nothing and does not make a single
-`stat` call. A file whose mtime cannot be read is opened, not skipped:
-uncertainty resolves toward looking.
+reader of an `if`. A window with no lower bound — unbounded, or `--until`
+alone — prunes nothing and does not make a single `stat` call. A file whose
+mtime cannot be read is opened, not skipped: uncertainty resolves toward
+looking.
 
 ### The invariant was measured, not assumed
 
@@ -58,8 +59,9 @@ rumour, so here are the conditions, and they are printed by the bench itself:
 
 - **build profile:** release. `mise run bench` encodes it rather than trusting a
   human to remember, and `tests/bench.rs` refuses to assert under
-  `debug_assertions` at all: the same grep is recorded there at 35.9 s in debug
-  against ~1.06 s in release, which is a number about the profile, not the code.
+  `debug_assertions` at all: on the pre-recount-hwk.47 code its module doc
+  records the same grep at 35.9 s in debug against 2.83 s in release — 13x,
+  from the optimiser alone, which is a number about the profile, not the code.
 - **hardware:** AMD Ryzen 7 PRO 8840HS w/ Radeon 780M, 16 cores visible, Linux.
 - **corpus:** 500 synthetic sessions, 40 turns each, 193.0 MB, written into a
   tempdir and deleted on exit.
@@ -90,6 +92,17 @@ pass refuses on topology, `at` re-scans unwindowed to find the true refusal
 reason, because the sessions a `no overlap` refusal must cite are exactly the
 ones the prune removed. 312 ms is what that costs, and it is paid only by a run
 that is about to explain itself. [join.md](join.md) has the reasoning.
+
+### A third ceiling, not from the spec
+
+0.2.0 added one more, in its own test (`keyed_at_beats_the_topological_scan`)
+on its own generated corpus, so it cannot move the two above: a keyed `at`,
+driven through `explain` on a ledger row that names its transcript, must finish
+under `KEYED_CEILING` (`tests/bench.rs`) *and* beat the topological path that
+re-scans. It is a windowed number on the same 499-of-500-pruned shape, and the
+bench says so: the key removes the ladder and the unwindowed re-scan, not the
+windowed discovery parse. No run of it is recorded on this page; `mise run
+bench` prints it beside the two above.
 
 ## The same commands on a real corpus
 
@@ -146,9 +159,10 @@ ASCII pair without building a `char::to_lowercase()` iterator).
 
 It stays, deliberately. Removing it means handing `discover` its parsed turns
 back, which is a change to the `Connector` trait — a seam `docs/spec.md`
-describes and nobody has authorised widening. The cost is measured, recorded
-here and printed by the bench every time it runs; that is preferable to a trait
-change made quietly for 540 ms.
+describes and nobody has authorised widening. The cost was measured once and is
+recorded here; the bench restates it on every run, as a fixed figure in its
+printed decomposition rather than a fresh measurement. That is preferable to a
+trait change made quietly for 540 ms.
 
 ## Running it yourself
 

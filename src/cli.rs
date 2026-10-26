@@ -18,7 +18,7 @@
 //! `completion` is the one command the spec does not name, and the one that
 //! does NOT follow the "all --json" rule — its stdout is a shell program, so
 //! `--json` is accepted and ignored. See [`crate::cmd::completion`] for why,
-//! and the README's "Deviations from the spec's literal text".
+//! and "Departures from the spec" in `docs/architecture.md`.
 
 use std::path::PathBuf;
 
@@ -44,8 +44,8 @@ worktrees, before any file is opened.
 
 A match is always scored, and always shows the evidence that scored it. \
 `recount` would rather refuse with a reason than answer confidently from a \
-signal that could not tell two sessions apart — see `Where recount is weak` \
-in the README for the case where it does exactly that.",
+signal that could not tell two sessions apart — see docs/limitations.md for \
+the case where it does exactly that, and how its output says so.",
     after_help = "Run `recount help <command>` for the long form, including exit codes.",
     after_long_help = "\
 EXIT CODES
@@ -75,8 +75,8 @@ EXAMPLES
   recount at --repo . --agent skeleton --ts 2026-08-19T07:13:57Z
       The session driving that identity at that moment, or exit 1: either a
       refusal naming which of the two reasons applies (no cwd match, no
-      overlap), or a candidate that scored below the confidence bar, shown
-      with the evidence that fell short.
+      overlap), or a candidate that is not confident — below the bar, or a
+      lead the worktree could not single out — shown with its evidence.
 
   recount grep arkanoid --repo .
       Case-insensitive substring hits as (session, line, ts, role, snippet).
@@ -111,9 +111,10 @@ produced it; there is no code path that prints a bare answer.
 EXIT CODES
   0  a confident match — the transcript window follows
   1  no confident match. Either a structural refusal naming which of the two
-     reasons applies (`no cwd match` / `no overlap`), or a candidate that
-     scored below the confidence bar, printed WITH its evidence so you can see
-     what fell short. Both are answers, not failures.")]
+     reasons applies (`no cwd match` / `no overlap`), or a candidate that is
+     not confident — it scored below the bar, or it is a LEAD because the
+     worktree could not single it out — printed WITH its evidence so you can
+     see what fell short. Both are answers, not failures.")]
     At(AtArgs),
     /// Case-insensitive substring hits with their coordinates
     Grep(GrepArgs),
