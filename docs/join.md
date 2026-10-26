@@ -6,18 +6,23 @@ module doc carries the same reasoning next to the arithmetic.
 
 Everything below was checked against the code, or measured on this repository
 on 2026-08-19 at `457a254`, and on 2026-08-20 at `6c412a7` and again after the
-lead rule landed. Where a number is a
+lead rule landed. The prose was re-checked against the code at v0.2.0
+(`6975d07`) on 2026-10-26; the ledger counts from that check come from the
+`.pact/events.jsonl` committed at that sha, and the transcript corpus was not
+available for it, so nothing on this page was re-run then. Where a number is a
 measurement, its conditions are stated with it; re-measure before quoting one,
 because the ledger and the corpus both grow and the worktrees a fleet leaves
 behind get deleted.
 
 ## Two tiers, and only the lower one is scored
 
-pact 0.11.0 stamps an attribution chain on the events it writes, and one field
-of it changes the question being asked. An event carrying `harness_subagent`
-**names** the transcript it was written from. Resolving that is a path join and
-one `is_file()` — no candidate set, no score, no tie to break — so it is not a
-fifth rung on the ladder below, it is a tier **above the whole ladder**:
+pact 0.11.0 stamps an attribution chain on the events it writes, and two fields
+of it change the question being asked. An event carrying `harness_subagent`
+**names** the subagent transcript it was written from; an event carrying
+`harness_session` and no `harness_subagent` names the top-level session's own
+`<session>.jsonl`. Resolving either is a path join and one `is_file()` — no
+candidate set, no score, no tie to break — so it is not a fifth rung on the
+ladder below, it is a tier **above the whole ladder**:
 
 | tier | how it answers | what it returns |
 |---|---|---|
@@ -29,14 +34,18 @@ when the tier arrived above it: same three signals, same four rungs, same
 threshold. One is an identity, the other is a guess, and there is no exchange
 rate between them.
 
-**The gate is `harness_subagent`, and nothing else** — not `harness.is_some()`,
-not `harness_session.is_some()`. A top-level agent has a harness and a session
-and is not a subagent of anything. That is not a degraded chain, it is what a
-complete one looks like for a top-level agent: 13 rows of this repo's ledger are
-exactly that shape — 12 orchestrator rows and one precheck, measured 2026-08-20
-on a live ledger where, unlike the subagent-bearing count, this one does not
-grow with each wave. Proxying the gate onto those fields would send a normal
-state into a keyed lookup that cannot succeed, turning it into a refusal.
+**The gate is the two ids, and nothing else** — never `harness.is_some()` or
+`model.is_some()`, which name no file. `harness_subagent` wins where both are
+present, because it names the narrower file. Until the morning of 2026-08-20 the
+gate was `harness_subagent` alone, and a row with only a session id fell to the
+ladder; `d94acd2` widened it, because a top-level agent has a harness and a
+session and is not a subagent of anything, and its session id names its own
+transcript just as exactly. That is not a degraded chain, it is what a complete
+one looks like for a top-level agent: 13 rows of this repo's ledger were exactly
+that shape on 2026-08-20 — 12 orchestrator rows and one precheck. This page
+then said that count "does not grow with each wave"; it did. At `6975d07` the
+ledger has 308 rows, 131 carrying a chain: 95 with a subagent id and 36
+session-only, 35 of them `orchestrator` and one `precheck`.
 
 Several encoded session directories are stat'd, not one, because a repo and its
 worktrees encode to different ones and the event does not say which. That is a
@@ -66,53 +75,64 @@ the comparison itself would drop an identity for failing a test it was never
 sitting.
 
 `Match` still cannot be built without a non-empty `Vec<Evidence>`, keyed answers
-included. The single `Signal::Keyed` line names both ids, the path they joined
-to, and the fact that the ladder was never consulted.
+included. The single `Signal::Keyed` line names the id or ids it joined, the
+path they joined to, and the fact that the ladder was never consulted — in one
+of two sentences, because "a subagent wrote this" and "the agent that owns the
+session wrote this" answer different questions about who acted. The second
+says so in capitals: "the event named a TOP-LEVEL session transcript, not a
+subagent's … Whoever wrote this event owns that session and is nobody's
+subagent".
 
 ### Every topological answer says why it was not keyed
 
 Answers from the lower tier carry a `Signal::Keyed` evidence line too, and it
 has exactly one thing to say, because there is exactly one way to reach the
-ladder from here: the field was absent. An event that *has* a `harness_subagent`
-either resolves keyed or refuses. It never quietly demotes to guessing, which
-is the outcome the tier exists to prevent — an identity silently rounded down to
-a score is indistinguishable, in the output, from a score that was earned.
+ladder from here: the event carried no chain at all. An event that has *either*
+id resolves keyed or refuses. It never quietly demotes to guessing, which is the
+outcome the tier exists to prevent — an identity silently rounded down to a
+score is indistinguishable, in the output, from a score that was earned.
 
-So the line says "no `harness_subagent` on this event … a normal state, not a
-degraded one". It is a statement about the event, not a complaint about it.
+So the line (`NO_CHAIN` in `src/join.rs`) says "no harness chain on this event
+at all … This is a PRE-CONTRACT row, written before pact stamped the
+attribution chain: it is OLD, not defective". It is a statement about the
+event, not a complaint about it. It used to say "no `harness_subagent` on this
+event … a normal state, not a degraded one", which stopped being true of every
+row that reaches the ladder once session-only rows stopped reaching it.
 
 ### The parent case: a session with no subagent
 
 A row with a `harness_session` and no `harness_subagent` names a file just as
 exactly — the top-level `<session>.jsonl`, whose stem equals its `sessionId` in
-238 of 238 observed files ([format-notes.md](format-notes.md) §3.1). The
-connector half already does it: `claude_code::keyed(dir, session, None)` returns
-that path. The join does not yet call it that way; `recount-1cw.13` is that
-change, and it must reuse `Tier::Keyed` rather than invent a third tier.
+238 of 238 observed files ([format-notes.md](format-notes.md) §3.1).
+`claude_code::keyed(dir, session, None)` returns that path, and since `d94acd2`
+(2026-08-20) the join calls it that way, through the same `Tier::Keyed` rather
+than a third tier. Before that change these rows fell to the ladder and landed
+on some subagent's transcript instead of the session's own; line 216 of this
+repo's ledger, an orchestrator `released`, scored 0.40 there and now keys to
+the top-level file.
 
-It is worth what it is worth, which is this run's own self-audit: the 13 rows
-above, all of them the orchestrator's, which today fall to the ladder and land
-on some subagent's transcript instead of the orchestrator's own. It does **not**
-moot the tie-break defect described below — the rows that defect was measured on
-predate the contract and carry no session id either, so there is nothing to key
-them by.
+It does **not** moot the tie-break defect described below — the rows that
+defect was measured on predate the contract and carry no session id either, so
+there is nothing to key them by.
 
 ### Not yet reachable from the command line (2026-08-20)
 
-The tier is in `join::resolve`. The two commands that call it are not wired to
-it yet: `at` and `explain` both build their `Query` with `harness_session: None`
-and `harness_subagent: None`, so every CLI invocation today takes the
-topological branch — including on the rows of this repo's own ledger that do
-carry a subagent id (35 of 225 on 2026-08-20). That is `recount-1cw.6` and
-`recount-1cw.7`. Until they
-land, the `Signal::Keyed` line printed on those rows says the event had no
-subagent id when the event has one: the join is describing the query it was
-handed, accurately, and the query dropped the field on the way in.
+That was true at `6c412a7`: the tier was in `join::resolve`, but `at` and
+`explain` both built their `Query` with `harness_session: None` and
+`harness_subagent: None`, so every CLI invocation took the topological branch —
+including on the 35 of 225 rows that then carried a subagent id — and printed a
+`Signal::Keyed` line saying the event had no subagent id when it had one.
+
+It is no longer true. `explain` passes the event whole to `at::run_with`, and
+`testify` passes the ledger row a finding points at, so both hand
+`join::resolve` the event's two ids. `at` on its own still cannot: it has no
+flag that names a transcript, so a plain `recount at` resolves topologically,
+as it always did ([cli.md](cli.md)).
 
 ## What the keyed tier does not fix
 
-It is a real improvement and a narrow one. Four things it leaves exactly where
-they were, and the last three are the ones a reader is most likely to assume it
+It is a real improvement and a narrow one. Five things it leaves exactly where
+they were, and the last four are the ones a reader is most likely to assume it
 handled.
 
 **Every pre-0.11.0 ledger is un-keyed, forever.** Only the agent can write
@@ -156,6 +176,21 @@ is a complete record of a top-level agent, not a truncated record of a subagent.
 Anything that reads the absence as damage — a warning, a lower score, a refusal
 — manufactures a finding, which is the failure mode this whole tool was written
 against.
+
+**But a session-only row cannot prove a top-level agent wrote it.** pact takes
+`harness_session` from `CLAUDE_CODE_SESSION_ID`, which a subagent inherits from
+its parent unchanged — pact's own `src/harness.rs` records a real subagent's
+environment carrying the parent's uuid and nothing of its own — and takes
+`harness_subagent` only from a declared `PACT_HARNESS_SUBAGENT`. So a subagent
+that skipped the self-id recipe writes a row shaped exactly like the
+orchestrator's, and the keyed tier answers it with the **parent's** top-level
+transcript: tier `keyed`, no score, not a lead, exit 0, and an evidence line
+saying the writer "is nobody's subagent". The row's `agent` field is the only
+thing that could contradict it, and the keyed tier never reads it. This page
+has no measured case — at `6975d07` the 36 session-only rows are 35
+`orchestrator` and one `precheck` — so it is a hole in what the row can say,
+not an observed miss. When it does happen, the answer is wrong with the
+authority of an identity.
 
 ## The key is topological
 
@@ -355,8 +390,9 @@ filtered to "sessions in this repo" and says so.
 
 Every answer names the regime it was decided in, in its topology evidence line.
 That sentence is not decoration: in every regime but topology A it is followed
-by the words `THIS IS A LEAD, NOT A CONFIDENT ANSWER`, and the answer is not
-confident whatever it scored.
+by the words `THIS IS A LEAD, NOT A CONFIDENT ANSWER` when a mention picked the
+session out, or `THIS IS A LEAD AT BEST, NOT AN ANSWER` when nothing did, and
+the answer is not confident whatever it scored.
 
 ## The refusals
 
@@ -375,7 +411,8 @@ which fails in a way neither of the others describes.
   says of each whether its span missed the window entirely or straddled it and
   was silent through it, because only the first is fixed by widening.
 - **`no keyed transcript`** — the event named a transcript and the name did not
-  produce one. Keyed events only; nothing on the ladder can raise it. *Go and
+  produce one. Keyed events only — a subagent id or a session id — and nothing
+  on the ladder can raise it. *Go and
   look at the disk, or at the ledger* — which of those depends on the cause,
   and the detail says which.
 
@@ -395,7 +432,9 @@ to find.
   from another machine**, in which case the transcript was never here, no
   amount of looking will find it, and the question cannot be answered on this
   host at all. The refusal lists every path it stat'd, so the reader can tell
-  the two apart by looking at them.
+  the two apart by looking at them. For a top-level session file it adds that
+  tidying is the unlikely half: that session ran in a directory that "OUTLIVES
+  THE RUN", so retention or a deletion is the better bet.
 - **Malformed** — the id is not an id. Nothing was joined and nothing was
   stat'd, so this is not a transcript that has gone missing, it is a defect in
   the event that names it: look at the ledger, not the disk. The shape check is
@@ -432,7 +471,7 @@ has the conditions.
 These 177 events predate pact 0.11.0 and carry no attribution chain, so the
 tier above cannot reach them, and `recount-gwx` — the tie broken by filesystem
 path order — decides them exactly as it did before. Re-run on 2026-08-20 after
-the lead rule landed, the example below returns the same wrong transcript at
+the lead rule landed, the event below returned the same wrong transcript at
 the same 0.65 — but now as a **lead**, with `"confident": false`, `"lead":
 true` and exit 1. That is the change: the answer is as wrong as it was and the
 tool no longer stands behind it. The
@@ -471,6 +510,12 @@ answer goes to the alphabetically first subagent transcript that happens to say
 the word — never to the orchestrator's own session, which mentions its own name
 on line 7 and would have tied.
 
+That is the mechanism as measured at `457a254`. The current code reaches the
+same filter by a shorter road: `invoked_from: main` names the repo root, which
+is tested before any count is taken, so all 59 — the first three included — are
+scored as a filter whatever `exact` would have been. The tie-break after it is
+unchanged.
+
 One of them, re-run at `6c412a7` on 2026-08-20. The command is `recount --json
 explain --repo . --event-line 60`; the transcript window and the unchanged
 event fields are projected away with `jq`, nothing is edited:
@@ -484,11 +529,11 @@ event fields are projected away with `jq`, nothing is edited:
   "evidence": [
     {
       "signal": "topology",
-      "detail": "session cwd /home/chussenot/Documents/recount is worktree `main` — invoked_from named the MAIN CHECKOUT, which every agent not in a worktree shares … a cwd at the repo root names no one, however many sessions happen to sit there, so the chain filtered without discriminating and the transcript mention decides. THIS IS A LEAD, NOT A CONFIDENT ANSWER: …"
+      "detail": "session cwd /home/chussenot/Documents/recount is worktree `main` — topology A (process-per-agent) but ambiguous: several candidate sessions name the same worktree, so the chain filtered without discriminating and the transcript mention decides"
     },
     {
       "signal": "time_overlap",
-      "detail": "6 turn(s) of this session fall inside the queried 2026-08-19T07:33:15Z..2026-08-19T07:43:15Z (the session covers 2026-08-19T07:41:47Z..2026-08-19T07:51:56Z)"
+      "detail": "session covers 2026-08-19T07:41:47Z..2026-08-19T07:51:56Z and overlaps the queried 2026-08-19T07:33:15Z..2026-08-19T07:43:15Z"
     },
     {
       "signal": "transcript_mention",
@@ -502,12 +547,24 @@ event fields are projected away with `jq`, nothing is edited:
 }
 ```
 
+That block is what `6c412a7` printed, restored verbatim. For a while two of its
+lines were rewritten in place — the topology line to the lead rule's wording,
+the overlap line to the turn-based gate's — while the keyed line stayed as
+`6c412a7` printed it: a combination no binary ever printed, under a sentence
+that said nothing was edited. The current code prints different words on three of
+those four lines, read from `src/join.rs` rather than re-run, because the corpus
+is not on the machine this was checked on: the topology line is the
+`MAIN CHECKOUT` sentence ("a cwd at the repo root names no one, however many
+sessions happen to sit there …") followed by `THIS IS A LEAD, NOT A CONFIDENT
+ANSWER`; the overlap line counts turns ("N turn(s) of this session fall inside
+the queried …"); and the keyed line is the `NO_CHAIN` sentence above. Same
+three signals, same sum, same 0.65.
+
 The event is the orchestrator taking the merge lock to merge `wt/connector`.
 The transcript returned is `agent-a0b9643f93682445f.jsonl`, whose sidecar
 describes it as *"W2 join engine bead"* — the `join` agent, a different agent
 doing different work. Until 2026-08-20 that was exit 0, printed as CONFIDENT;
-it is now exit 1, printed as `LEAD — NOT CONFIDENT`, with the same 0.65 and the
-same evidence.
+it is now exit 1, printed as `LEAD — NOT CONFIDENT`, with the same 0.65.
 
 **Its own output says so.** The topology line says "filtered without
 discriminating … the transcript mention decides". The mention it decided on is

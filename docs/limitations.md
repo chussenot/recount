@@ -34,6 +34,28 @@ no tie to break. Rows written before pact did this, or by an agent that could
 not resolve its own transcript id, still fall through to the topological tier
 and its ceiling. See [join.md](join.md#two-tiers-and-only-the-lower-one-is-scored).
 
+## A keyed answer is only as honest as the row that named it
+
+A keyed answer has no score because it is not inferred: the ledger row named the
+transcript. But a row that carries `harness_session` and no `harness_subagent`
+cannot prove a top-level agent wrote it. A subagent inherits its parent's session
+id, so one that skipped resolving its own transcript id writes a row shaped
+exactly like the orchestrator's — and recount answers it with the **parent's**
+transcript, tier `keyed`, no score, exit `0`. The row's `agent` field is the only
+thing that could contradict that, and the keyed tier does not read it.
+
+No case of this is measured: on this repository's own ledger every session-only
+row belongs to the orchestrator or the precheck. It is a hole in what a row can
+say rather than an observed miss — but when it happens, the answer is wrong with
+the authority of an identity, and no evidence line warns you.
+[join.md](join.md#what-the-keyed-tier-does-not-fix) has the detail.
+
+**What to do about it:** make every subagent in your fleet resolve and export
+its own transcript id before its first pact command, so its rows carry
+`harness_subagent`. A keyed answer for an agent other than the orchestrator that
+names a top-level `<session>.jsonl`, not an `agent-<id>.jsonl`, is worth a
+second look.
+
 ## recount is wrong on its own ledger, and its own output shows it
 
 Run recount against the coordination log of its own construction. Measured on

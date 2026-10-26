@@ -73,7 +73,7 @@ it. There are five outcomes:
 
 | You see | It means | Exit |
 |---|---|---:|
-| `tier keyed` · no score | The ledger named the transcript (pact stamped `harness_session` / `harness_subagent` on the event). This is an identity, not a guess. | `0` |
+| `tier keyed` · no score | The ledger named the transcript (pact stamped `harness_session` / `harness_subagent` on the event). This is an identity, not a guess — provided the agent that wrote the row is the one it names ([limitations.md](limitations.md#a-keyed-answer-is-only-as-honest-as-the-row-that-named-it)). | `0` |
 | `confidence 0.70` or `0.95` · `CONFIDENT` | The worktree singled the session out. An answer that stands on its own. | `0` |
 | `LEAD — NOT CONFIDENT` | The worktree could only *filter* — several sessions share it, typically subagents of one parent — and a transcript mention picked this one, or nothing did. Somewhere to look, not an answer. | `1` |
 | `NOT CONFIDENT` | A candidate scored below the bar. | `1` |

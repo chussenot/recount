@@ -20,25 +20,31 @@ mise run check   # the full CI gate, locally
 | `mise run lint` | `cargo clippy --all-targets -- -D warnings` |
 | `mise run test` | `cargo test` |
 | `mise run lint-lines` | `scripts/check-lines.sh` (warning, never a gate) |
-| `mise run check` | the four above, in CI's order, serially |
-| `mise run bench` | the two spec ceilings, release only, minutes |
+| `mise run check-docs` | `cargo build`, then `scripts/check-docs.sh` |
+| `mise run check` | the five above, serially |
+| `mise run bench` | `cargo test --release --test bench -- --ignored --nocapture`: the spec's two ceilings and the keyed one, minutes |
 | `mise run dogfood` | recount against this repo's own log |
+
+Three more are not gates: `mise run build` (`cargo build`), `mise run fmt`
+(`cargo fmt`) and `mise run install` (see [install.md](install.md#with-mise)).
 
 `--all-targets` on clippy is not the default and is not decoration: the default
 misses `tests/`, and every proof obligation the spec sets lives there.
 
 ## Why `check` is serial
 
-`mise run check` lists its four legs in `run` rather than in `depends`, and
-that is not a style preference. `depends` runs tasks in **parallel**, and all
-four legs reach the binary through the single path `target/debug/recount`. The
+`mise run check` lists its five legs in `run` rather than in `depends`, and
+that is not a style preference. `depends` runs tasks in **parallel**, and the
+legs reach the binary through the single path `target/debug/recount`. The
 integration tests spawn it via `env!("CARGO_BIN_EXE_recount")`, so a parallel
 leg rebuilding that file while another leg's tests are mid-spawn is a race with
 a confusing failure. pact's own `mise.toml` records losing three runs out of
 three to exactly this.
 
-The order and the commands match `.github/workflows/ci.yml` exactly. A local
-gate that does not match CI is not a gate.
+The commands match `.github/workflows/ci.yml`. The order nearly does: CI runs
+the docs gate before the line-length warning, `check` runs it after, which
+cannot change a verdict because the warning always exits 0. A local gate that
+does not match CI is not a gate.
 
 ## Why `bench` is not in `check`
 
@@ -48,8 +54,9 @@ minutes. A required gate with those properties is one people switch off.
 The task pins `--release` rather than trusting a human to remember, because
 `tests/bench.rs` refuses to assert under `debug_assertions`: measured on the
 same corpus and the same machine, the grep ceiling read 35.9 s in debug against
-~1.06 s in release. A debug run still prints every measurement, labelled with
-the profile it was taken in, and asserts nothing. Do not quote a debug number
+2.83 s in release. Release has got faster since; the 13x ratio is the point.
+A debug run still prints every measurement, labelled with the profile it was
+taken in, and asserts nothing. Do not quote a debug number
 as if it settled anything — a benchmark figure without its build profile,
 corpus size and warm/cold state is a rumour, not a measurement.
 
@@ -83,7 +90,7 @@ output. A fixture asserts what its author already believed; the real corpus
 does not.
 
 `explain --event-line 1` exits 1 in the task and the task tolerates it. That
-exit is a reasoned refusal, not a failure — see the README's weakness section.
+exit is a reasoned refusal, not a failure — see [limitations.md](limitations.md).
 
 ## The scripts
 
@@ -91,9 +98,12 @@ exit is a reasoned refusal, not a failure — see the README's weakness section.
 lines, the unit a person leases, reads and diffs. It counts code before the
 first top-level `#[cfg(test)]`, because a co-located test module is where
 Rust's tests idiomatically belong and nobody edits one to change behaviour.
-Three files in this repo are over 800 *total* lines and all three are well
-under 800 lines of code; a check that warned on those would be switched off
-within a week, which is worse than no check. It is a **warning and always exits
+When the script was written, three files were over 800 *total* lines and all
+three were well under 800 lines of code; a check that warned on those would be
+switched off within a week, which is worse than no check. At 0.2.0 eight files
+are over 800 total lines, and three draw the warning on code alone:
+`src/join.rs`, `src/cmd/at.rs` and `tests/bench.rs`. Run the script for the
+current numbers rather than trusting these. It is a **warning and always exits
 0** — an 850-line file is a conversation, not a build break. One script, two
 callers (`mise run lint-lines` and the CI job), so the local and CI checks
 cannot drift apart.
@@ -116,13 +126,15 @@ Two checks, both in both directions:
 2. Every relative link and every `#anchor` in `README.md` and `docs/*.md`
    resolves. Anchors rot exactly like filenames, and silently.
 
-It is not currently wired into `mise run check` or CI; run it by hand after a
-change to the CLI surface.
+It is a real gate: `mise run check` runs it through `mise run check-docs`,
+and CI runs it after `cargo test`, which has already built the binary it
+reads.
 
 ## Test layout
 
-`cargo test` runs 112 unit tests, 10 degradation tests and 3 fixture tests; the
-2 bench tests are `#[ignore]`d.
+At 0.2.0, `cargo test` runs 156 unit tests, 10 degradation tests, 3 fixture
+tests and 8 keyed tests; the 3 bench tests are `#[ignore]`d. Counts drift; the
+`test result:` lines are the current answer.
 
 **Unit tests live in-module**, under `#[cfg(test)]`, next to the code they pin.
 
@@ -150,7 +162,23 @@ answer 0 while the directory is still there. Asserting only on the exit code
 would pass for the wrong reason, which is the exact class of confident-wrong
 answer recount was written to catch.
 
-**`tests/bench.rs`** — two measurements, `#[ignore]`d, release only. See
+**`tests/keyed.rs`** — the keyed tier, the model comparison and `testify`,
+against the real binary and the tree in `tests/fixtures2/`. One worktree, two
+transcripts, five ledger rows that differ only in their attribution chain, so
+one query gets five different tiers and reasons. Its first test asserts the
+keyed tier *overruling* the ladder's own preference, because a fixture where
+both tiers happened to pick the same file would let that property rot
+unnoticed. Refusals are asserted by reason, never by exit code. The canned
+`pact audit` documents `testify` reads live there too.
+
+**`tests/common/mod.rs`** — the shared harness: a throwaway `$HOME` and git
+repo, `{{REPO}}` substituted into fixtures on the way in, and the binary
+spawned with `HOME` set on the child, never on the test process, because the
+harness runs tests on many threads and `set_var` would leak between them.
+
+**`tests/bench.rs`** — three tests, all `#[ignore]`d: the spec's two ceilings
+(one test), the keyed tier against the topological scan, and a reference run
+over the real `~/.claude` corpus. Release only. See
 [performance.md](performance.md).
 
 ## The two agents
@@ -161,8 +189,10 @@ answer recount was written to catch.
   generated completions still describe the binary that exists. Reach for it
   after adding or renaming a subcommand, flag, enum value or default, and
   whenever a help string quotes a constant that may have moved. `at --help`
-  hand-writes the two refusal reasons, for instance; a third one added in
-  `src/join.rs` would not update that prose.
+  hand-writes the refusal reasons, for instance, and this is no longer
+  hypothetical: at 0.2.0 it still names two (`no cwd match` / `no overlap`)
+  while `src/join.rs` has a third, `no keyed transcript`, which arrived with the
+  keyed tier and did not update that prose.
 - **`docs-curator`** — keeps `README.md` and `docs/` in step with the binary.
   Reach for it after any change a user could notice, when `check-docs.sh` fails,
   or when a doc claim needs verifying. Its first job is deciding whether
@@ -173,8 +203,12 @@ owns what the repository says about the binary.
 
 ## Cutting a release
 
-`cog bump` moves `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md` together, then
-tags. Push the tag and `.github/workflows/release.yml` does the rest.
+`cog bump` writes the `CHANGELOG.md` section, commits it as
+`chore(version): <x.y.z>` and tags. `Cargo.toml` and `Cargo.lock` must carry the
+same version in that commit — `0.2.0`'s does — but `cog.toml` declares no
+`pre_bump_hooks` to put it there, so check both before you tag; the `integrity`
+job below refuses a tag either one disagrees with. Push the tag and
+`.github/workflows/release.yml` does the rest.
 
 It refuses more than it builds, and the refusals are the point. Before anything
 is compiled, the `integrity` job checks that the tag's commit is an **ancestor
@@ -209,7 +243,8 @@ reading the code, not by picking.
 
 `docs/spec.md` is treated as frozen. It was committed verbatim as the contract
 the fleet built against, and where the code deliberately departs from it that
-belongs in the README's deviations section, never in an edit to the spec. It has been edited once since, on the maintainer's instruction, to remove
+belongs in
+[architecture.md](architecture.md#departures-from-the-spec), never in an edit to the spec. It has been edited once since, on the maintainer's instruction, to remove
 references to a third-party project. That edit changed no requirement.
 
 ## See also
