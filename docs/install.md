@@ -35,7 +35,11 @@ verdict is `.join_readiness.ready` under `--json`. See
 
 ## With mise
 
-`mise tasks` lists them all. The two that matter for installing:
+`mise install` brings in the Rust toolchain and [mbx](https://mr-boxington.jdx.dev),
+the build cache every Cargo command run through mise goes through —
+[development.md](development.md#the-build-cache) explains what that changes and
+the one thing to know about it. `mise tasks` lists the tasks. The two that
+matter for installing:
 
 | task | what it does |
 |---|---|

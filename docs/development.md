@@ -27,9 +27,66 @@ mise run check   # the full CI gate, locally
 
 Three more are not gates: `mise run build` (`cargo build`), `mise run fmt`
 (`cargo fmt`) and `mise run install` (see [install.md](install.md#with-mise)).
+Two look after the build cache below: `mise run cache` (what it saved and
+holds) and `mise run clean` (`cargo clean`, then `mbx clean`).
 
 `--all-targets` on clippy is not the default and is not decoration: the default
 misses `tests/`, and every proof obligation the spec sets lives there.
+
+## The build cache
+
+Every Cargo command mise runs goes through
+[mbx](https://mr-boxington.jdx.dev) ("mr boxington"), a shared build cache:
+`mise.toml` pins `mr-boxington` and routes `cargo` through it with a
+`[wrappers.cargo]` entry. mbx restores compiler outputs it has already produced
+from one store under `~/.cache/mbx`, and compiles only what it has not seen.
+
+It earns its place here because a pact fleet is many worktrees of one
+repository, each compiling the same dependency graph from scratch. Measured on
+this repository, in a cloud container, with mbx 1.28.0:
+
+| build | time | from the cache |
+|---|---:|---|
+| first `cargo build`, cold store | 10.7 s | nothing — it fills the store |
+| `cargo build` in a second worktree | 0.3 s | 47 of 47 dependency units |
+| `cargo build` after `mise run clean` | 0.3 s | 47 of 47 |
+| `cargo test --no-run` after `mise run clean` | under 1 s | 20 of 20 |
+| `mise run check`, warm | 5 s | — |
+
+**To use it on your machine:** `mise install`, then run Cargo through mise —
+`mise run <task>`, `mise exec -- cargo …`, or plain `cargo` in a shell where
+mise is activated (`command -v cargo` should print a path under mise's
+`command-wrappers`). `mbx doctor` checks the whole setup.
+
+**The one thing to know.** After the first wrapped build, `target` is a symlink
+into mbx's store, and the dependency artifacts restored into it are read-only
+hard links. A Cargo that bypasses mbx — `~/.cargo/bin/cargo` with mise not
+activated, or an editor with its own `PATH` — gets no cache, and when it has to
+rebuild one of those artifacts in place it fails with `output file … is not
+writeable`. Either keep Cargo behind mise, or run `mbx setup` once and put the
+Cargo shim it prints (`~/.local/share/mbx/bin` on Linux) first on `PATH`; that
+also sends rust-analyzer's checks through the cache. The paths the docs and
+scripts use, `./target/debug/recount` included, work through the symlink
+unchanged.
+
+**`cargo clean` is not a clean under mbx.** It removes the `target` link, and
+the next build relinks the same managed target. `mise run clean` also runs
+`mbx clean`, which removes this checkout's managed target; the shared store —
+what makes the next worktree warm — stays, and `mbx gc` is what shrinks it.
+
+**In a Claude Code cloud session** `.claude/hooks/session-start.sh` does all of
+this before the first prompt: it installs mise, sets `MISE_ENV=cloud` so
+`mise.cloud.toml` supplies mbx from its pinned release URL (the sandbox cannot
+list versions through mise's GitHub backend), puts mbx's Cargo shim first on
+`PATH` so a plain `cargo test` is cached too, gives the cache an explicit
+budget (`gc.max_total_size` 8 GiB, `gc.min_free_size` 2 GiB — mbx's defaults are
+sized from the host's disk, not the session's allowance of it), and warms the
+build. `RECOUNT_SESSION_SKIP_BUILD=1` skips the warm build.
+
+**CI does not use it.** `.github/workflows/ci.yml` caches `~/.cargo` and
+`target` with `Swatinem/rust-cache`, keyed on the lockfile. mbx has a GitHub
+Action of its own (`jdx/mr-boxington-action`); moving CI to it is a separate
+decision, and nothing here depends on it.
 
 ## Why `check` is serial
 
