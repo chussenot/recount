@@ -8,6 +8,15 @@
 > [join.md](join.md#recount-is-wrong-on-this-repositorys-own-ledger) carries the
 > current numbers. Kept as-is deliberately: a replay that is quietly re-run
 > every time the corpus moves is not a replay.
+>
+> **The verdicts have moved too, and not because the corpus did.** Two changes
+> to the join on 2026-08-20 — the repo root names no one, and an answer the
+> chain did not decide is a *lead* ([join.md](join.md#a-mention-decided-answer-is-a-lead-and-the-tool-says-so))
+> — mean the current binary prints §1 and §2 at 0.65 as `LEAD — NOT
+> CONFIDENT`, exit 1, with the transcript window withheld; it also words the
+> topology and overlap evidence lines differently and adds a `keyed` one. The
+> output in §1–§3 is what the binary printed on 2026-08-19; the prose notes
+> where the code now disagrees.
 
 Run for real on 2026-08-19 against this repository's own
 `.pact/events.jsonl` (160 events) and this machine's `~/.claude/projects`
@@ -113,6 +122,15 @@ appeared in the transcript (0.25). recount never claims certainty, because
 it never has it: the join is inference over two artifacts neither of which
 was written to be joined.
 
+**And today it is not 0.95 at all.** The reasoning above — one session at
+that cwd, so the chain discriminated — is the exact mistake the join was
+later corrected for. `main` is the repo root, every agent not in a worktree
+shares it, and "exactly one session sits there" measures the corpus, not the
+chain. The current code tests for the root before counting, scores it as a
+filter (0.20), and calls the 0.65 that results a lead: exit 1, transcript
+withheld. Here the lead happens to point at the right session. The rule
+cannot know that, and §2 is why it does not try.
+
 ## 2. The same command, confidently wrong
 
 Now a question from later in the same ledger: *row 122 says `orchestrator`
@@ -157,7 +175,9 @@ recount at — /home/chussenot/Documents/recount
    recount itself, which prints the character count it withheld …]
 ```
 
-Exit 0. Confidence 0.65, above the 0.50 bar, printed as CONFIDENT.
+Exit 0. Confidence 0.65, above the 0.50 bar, printed as CONFIDENT. (The
+current binary prints the same 0.65 as `LEAD — NOT CONFIDENT` and exits 1;
+see the note at the top.)
 
 **It is wrong.** The event records the orchestrator holding the merge lock.
 The transcript printed is the `honesty` agent's subagent session, running
@@ -195,7 +215,7 @@ way for anyone downstream to catch it.
 
 Every one of the 49 matches at 0.65 in this ledger carries the same
 "filtered without discriminating" line. They should all be read as leads,
-not answers.
+not answers — and since 2026-08-20 the tool reads them that way itself.
 
 ## 3. Why 108 of 160 events refuse, and whose fault that is
 
@@ -253,19 +273,21 @@ was in the filesystem and was deleted. Two ways out, and a team has to pick
 one before the run, not after:
 
 - keep agent worktrees until the audit is done, and delete them afterwards; or
-- accept that once they are gone only the transcript-mention signal survives,
-  which on its own scores 0.40 and is deliberately below the bar.
+- accept that once they are gone the join refuses those rows with `no cwd
+  match`, and only the transcript mention survives — as a `recount grep` for
+  the agent's name, which the join will not score on its own, because a
+  mention never creates a match.
 
 ## The two topologies, and what each can reach
 
 The join's confidence ladder, from `src/join.rs`:
 
-| situation | confidence |
-|---|---|
-| chain singled the session out, + mention (topology A) | 0.95 |
-| chain singled it out, no mention | 0.70 |
-| chain only filtered, + mention (topology B) | 0.65 |
-| chain only filtered, no mention | 0.40 |
+| situation | confidence | verdict |
+|---|---|---|
+| chain singled the session out, + mention (topology A) | 0.95 | answer |
+| chain singled it out, no mention | 0.70 | answer |
+| chain only filtered, + mention (topology B) | 0.65 | lead |
+| chain only filtered, no mention | 0.40 | lead |
 
 Topology A is process-per-agent: each agent runs in its own worktree, its
 session cwd names that worktree, and the spec's chain resolves. It can reach
@@ -277,14 +299,16 @@ Claude Code process, every subagent inheriting the parent's cwd. The chain
 filters to the right *repo* and then stops. 0.65 is the ceiling, and reaching
 it requires the mention tiebreaker — which is precisely the signal section 2
 shows firing on a peer's boilerplate. Without a mention, topology B lands at
-0.40, below the 0.50 threshold, and `at` refuses. That threshold is set where
-it is so that "filtered but did not discriminate, and nothing else spoke" is
-a refusal rather than a guess.
+0.40, below the 0.50 threshold. Neither is a refusal: `at` still prints the
+candidate and its evidence, withholds the transcript, and exits 1, because the
+evidence is what tells the reader where to look next.
 
-Section 2 is the honest reading of the gap between 0.65 and 0.70: on topology
-B, a confident match is one weak signal away from a wrong one, and the
-evidence block is the only thing standing between a reader and the arkanoid
-mistake.
+Section 2 is the honest reading of the gap between 0.65 and 0.70. When this
+page was written, a confident match on topology B was one weak signal away
+from a wrong one, and the evidence block was the only thing standing between
+a reader and the arkanoid mistake. The verdict column is the fix that came
+after: no score the chain did not decide is confident, so on topology B
+nothing is — the 0.65 is still printed, as a lead.
 
 ## 4. The keyed tier, on this repository, on 2026-08-20
 
@@ -359,8 +383,12 @@ file records the same value, which is a corroboration and is printed as one.
 agent's first tool call wrote a literal marker into its own transcript and
 grepped for it — that is line 7 above, and it is why line 8 exists. Nothing
 in Claude Code hands a subagent its own transcript id. The chain is a
-convention the fleet's prompts enforce, not a property of the harness, and
-the moment a prompt drops the handshake the events fall back to the ladder.
+convention the fleet's prompts enforce, not a property of the harness. This
+page used to say that a prompt which dropped the handshake sent its events
+back to the ladder. It does worse: pact still stamps the *parent's* session id
+on such an event, and the join keys a session-only row — as an identity, with
+no score — to that session's top-level transcript, which is the parent's
+([join.md](join.md#what-the-keyed-tier-does-not-fix)).
 
 ## 5. A clean audit, and why that is the interesting case
 

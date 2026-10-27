@@ -1,8 +1,10 @@
 # Installing recount
 
-There is no release binary and no package. recount is a single Rust binary with
-no runtime state, no config file and no network access, so building it from
-source is the whole installation.
+There is no package in any registry. Each GitHub release carries prebuilt
+binaries for three targets — see [Prebuilt binaries](#prebuilt-binaries) —
+and everywhere else recount builds from source. It is a single Rust binary with
+no runtime state, no config file and no network access, so building it is the
+whole installation.
 
 ## From source
 
@@ -12,14 +14,15 @@ cargo build            # ./target/debug/recount
 cargo install --path . # ~/.cargo/bin/recount
 ```
 
-`cargo build --release` if you are measuring anything: the same grep is 35.9 s
-in debug against ~1.06 s in release on the same corpus, which is a fact about
-the optimiser and not about recount. See [performance.md](performance.md).
+`cargo build --release` if you are measuring anything: on the same corpus and
+the same machine the bench's grep read 35.9 s in debug against 2.83 s in
+release — 13x, a fact about the optimiser and not about recount. Release has
+been faster since (~1.0-1.2 s); the ratio is the point. See [performance.md](performance.md).
 
 Check what you got:
 
 ```bash
-recount --version   # recount 0.1.0
+recount --version   # recount 0.2.0
 recount doctor      # can a join even run here?
 ```
 
@@ -87,7 +90,9 @@ one build.
 
 ## Prebuilt binaries
 
-Every tag publishes a tarball per target, plus a `SHA256SUMS` file:
+Every version tag — bare `X.Y.Z`, no `v` prefix, the first being `0.1.0` —
+publishes a tarball per target, `recount-<tag>-<triple>.tar.gz`, holding the
+stripped binary, `README.md` and `CHANGELOG.md`, plus a `SHA256SUMS` file:
 
 | Target | Runner it was built and smoke-tested on |
 |---|---|
@@ -117,8 +122,9 @@ Windows for the reason below. Both build from source.
 
 ## What is not promised
 
-- **No MSRV.** Neither CI nor the release pins a toolchain; both use whatever
-  stable Rust the runner image ships. Pinning one would be making a promise
+- **No MSRV.** Neither CI nor the release pins a toolchain: CI uses whatever
+  stable Rust the `ubuntu-latest` image ships, and the release installs
+  whatever stable is current when it runs. Pinning one would be making a promise
   nobody made.
 - **No Windows.** Not an omission. recount resolves
   `~/.claude/projects/<encoded-path>` from POSIX absolute paths, shells out to
@@ -127,7 +133,9 @@ Windows for the reason below. Both build from source.
   then be wrong in ways no test here would catch.
 - **The full test suite runs on Linux only.** The release builds each target on
   its own native runner and smoke-tests the binary it just produced — version,
-  the whole command surface, `doctor` in an empty directory, and completion
+  the presence of `sessions`, `at`, `grep`, `explain`, `doctor` and
+  `completion` in `--help` (a list written into `release.yml`, which `testify`,
+  added in 0.2.0, is not on), `doctor` in an empty directory, and completion
   generation — but `cargo test` itself runs in one CI job on `ubuntu-latest`.
   A macOS binary is therefore known to *run*, not known to *pass the suite*.
 

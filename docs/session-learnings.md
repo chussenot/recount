@@ -479,6 +479,15 @@ every agent in the fleet cast the deciding vote" — measured at scale.
 CLI still prints `CONFIDENT` next to it, and `testify` prints it in a report
 a person is meant to act on.
 
+> **Since fixed** (re-checked 2026-10-26 against 0.2.0). Commit `719bede`, the
+> same day, added `Match::lead` in `src/join.rs`: an answer the chain filtered
+> but did not discriminate is a *lead*, and `Match::confident()` — the one
+> verdict `at` and `testify` ask for — is false for it whatever it scores. The
+> 0.65 is still computed and printed; the verdict now reads `LEAD — NOT
+> CONFIDENT`, `lead` is on both `--json` contracts, and
+> `the_keyed_tier_overrules_the_ladder` in `tests/keyed.rs` pins it. The
+> 16.7% above is the measurement that rule rests on.
+
 ### 0.95 is not a safe floor either
 
 pact's `stale-holds` produced eighteen findings at **0.95** — twelve for
@@ -502,6 +511,16 @@ a 3-minute session score the overlap signal identically. Overlap should be
 measured against *turn density inside the window*, not against the outer
 bounds of the file.
 
+> **Since fixed, in two parts** (re-checked 2026-10-26 against 0.2.0). The repo
+> root no longer discriminates: `Topology::SharedRoot` in `src/join.rs` is
+> decided before the exact-cwd count (`719bede`), so a session at the main
+> checkout is a lead, not a 0.95. And overlap is gated on turns inside the
+> window rather than on the file's span (`6072606`, recount-1cw.16). That gate
+> is *presence* — at least one turn in the window — not the density the INFER
+> proposes, so a long session with a single turn in the window still passes
+> it. The subagent this pointed past is reachable by name only through the
+> keyed tier, and only for ledger rows that carry `harness_subagent`.
+
 ### A CONFIDENT match with an empty transcript window
 
 Reproduced above in §5:
@@ -520,6 +539,14 @@ produced by different code paths and they disagree. The message is good; the
 score should not have been awarded. (This session is hopper, parked from
 20:30:42Z to 06:01:29Z — §2's gap is exactly what created the empty window.)
 
+> **Since fixed** (re-checked 2026-10-26 against 0.2.0) in `6072606`. The
+> overlap signal is now the turns inside the window, computed once into
+> `Match::in_window` and printed by both renderers, so on a topological answer
+> the window cannot be empty;
+> `a_scored_answer_can_never_award_overlap_with_an_empty_window` in
+> `src/join.rs` pins it. The empty-window message survives only for a keyed
+> answer, which never consulted the clock.
+
 ### `testify --json` drops the refusal reason
 
 `recount testify --repo … --json` emits `{"outcome":"refused","reason":null,
@@ -527,6 +554,14 @@ score should not have been awarded. (This session is hopper, parked from
 prints the full structural reason and the candidate list. Anyone consuming
 the JSON — which is the whole point of `testify` being a pipeline stage —
 gets a refusal with no explanation.
+
+> **Not a defect, on re-check** (2026-10-26, against 0.2.0). The reason is not
+> dropped: it is nested, `"refusal": {"reason": "no keyed transcript",
+> "detail": "…"}`, and has been since `testify` was introduced (`963bb60`,
+> before this study). There are no top-level `reason` or `detail` keys, so a
+> projection that asks for them reads `null` on every finding — the most
+> likely origin of the line quoted above. `docs/cli.md` documents the nested
+> shape.
 
 ### `retry-storm` is the one check `testify` cannot join
 
@@ -542,6 +577,14 @@ counts it — exit 0, three findings `passed_through`. That is the right
 behaviour on the wrong data: the single audit check that is *about agent
 behaviour over time* is the one whose findings carry no time. Every answer in
 §3 had to be found by hand.
+
+> **Since fixed upstream** (re-checked 2026-10-26). pact `951a1f6`
+> (`pact-x16.5`) gave every retry-storm finding `first_refusal_at`,
+> `last_refusal_at` and the refusals' `lines`. recount needed no change:
+> `testify`'s generic `*_at` sweep picks `first_refusal_at`, which a finding of
+> that shape piped through 0.2.0 confirms. `lines` is not among `testify`'s
+> `LINE_ALIASES`, though, so such a finding reaches the topological ladder
+> only — never the keyed tier, even when the ledger rows carry a chain.
 
 ---
 
@@ -601,6 +644,18 @@ as pact beads.** They belong in recount's own tracker: the cwd-displacement
 blind spot, the 16.7% precision of the 0.65 tier, session-span overlap
 scoring, the CONFIDENT-with-empty-window contradiction, and
 `testify --json` dropping the refusal reason.
+
+**Status, re-checked 2026-10-26.** The epic and all six pact beads were closed
+on 2026-08-20, fixed together in pact `951a1f6`. Of the recount findings, the
+CONFIDENT label on the 0.65 tier, session-span overlap scoring and the
+CONFIDENT-with-empty-window contradiction were fixed in `6072606`
+(recount-1cw.16) and `719bede` — see the notes in §6. `testify --json`
+dropping the reason was a misreading of a nested field, not a defect. **The
+cwd-displacement blind spot is still present in 0.2.0**: the keyed tier stats
+only the encoded directories of `--repo` and its worktrees (`keyed` in
+`src/join.rs`), so a fleet filed under another repository's directory refuses
+with `no keyed transcript`, whose detail names pruning and another machine as
+the causes and not displacement.
 
 ## 9. Findings that did NOT graduate
 

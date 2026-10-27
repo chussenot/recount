@@ -4,7 +4,7 @@ Every command, every flag, every exit code, every `--json` shape. This is the
 page to look things up in; [../README.md](../README.md) is the page that says
 why any of it is shaped this way.
 
-Verified against `recount 0.1.0`. `scripts/check-docs.sh` compares the
+Verified against `recount 0.2.0`. `scripts/check-docs.sh` compares the
 `Commands` block below against the built binary in both directions, so a flag
 that is missing here, or offered here and rejected by the parser, fails the
 build.
@@ -61,7 +61,8 @@ program, and a digest printed beside it on the same run would be sourced as
 code by the very redirect the command is designed for. `--json` is therefore
 accepted and ignored there — the script goes to stdout alone, byte-identical
 with and without the flag, and stderr stays empty. This deviation is recorded
-in the README rather than patched into `spec.md`, which is treated as frozen.
+in [architecture.md](architecture.md#departures-from-the-spec) rather than
+patched into `spec.md`, which is treated as frozen.
 
 ## Commands
 
@@ -89,9 +90,14 @@ The key is `fleet_identity`, and its `tier` says which kind of answer it is.
 (`harness_subagent`), so the identity is stated rather than inferred: the
 evidence names the `.pact/events.jsonl` line that says so, and `confidence` is
 `null`, because there is no number to give. `topological` is the guess it
-always was, with the score it always had. `agent` is nullable on either tier
-and `evidence` is never empty: when the agent is null the evidence says why it
-could not be told, which is itself the answer. See [join.md](join.md).
+always was, with the score it always had. `agent` is never null on a keyed
+row — the ledger named it — and may be null on a topological one; `evidence`
+is never empty, and when the agent is null the evidence says why it could not
+be told, which is itself the answer. Only a subagent transcript
+(`agent-<id>.jsonl`) can be keyed here, because the id is read off the
+filename. A ledger that names two different agents for one transcript is not a
+statement of identity: that row stays `topological`, with a `keyed` evidence
+line saying the ledger contradicted itself. See [join.md](join.md).
 
 Most sessions are `topological` and that is the expected result — pact only
 began stamping the chain in 0.11.0, and no later version can key a row written
@@ -111,7 +117,8 @@ recount at --repo <PATH> --agent <NAME> --ts <RFC3339> [--window <DURATION>] [--
 Resolve the session driving a fleet identity at a moment, and print the
 transcript window around it. `--agent` is the identity as it appears in the
 pact ledger; `--ts` is RFC 3339. `--window` is the **half-width** either side
-of `--ts`, default `5m`, so the default window is ten minutes wide.
+of `--ts`, default `5m`, so the default window is ten minutes wide. A
+duration is `30s`, `45m`, `2h`, `1d`, `2w`, or a bare number of seconds.
 
 Three outcomes behind two exit codes:
 
@@ -124,7 +131,7 @@ Three outcomes behind two exit codes:
 Every answer names **which tier** produced it. `tier keyed` means the event
 named its own transcript and it was found by one path join and one `stat` —
 there is no confidence beside it and none is missing. `tier topological ·
-confidence 0.65` is the scored ladder, against `threshold`. See
+confidence 0.95 · threshold 0.50` is the scored ladder, against `threshold`. See
 [join.md](join.md).
 
 The three refusals are not interchangeable: `no cwd match` sends you to the
@@ -132,11 +139,14 @@ topology, `no overlap` to the clock, and `no keyed transcript` to the transcript
 store — an event that named a file which is not on disk was either pruned or
 written on another machine.
 
-`low_confidence` prints the candidate on purpose: both structural gates passed
-and what fell short was the arithmetic, and that evidence is what tells an
+`low_confidence` prints the candidate on purpose: both structural gates passed,
+and what fell short was either the arithmetic or the chain itself — a *lead*,
+where the chain could not tell this session from its siblings and only the
+transcript mention picked it out, so no score it reaches counts (see `lead`
+under [JSON shapes](#at-and-explain)). Either way that evidence is what tells an
 auditor where to look next. It withholds the *transcript* on purpose too —
 under a topology where every session in the repo overlaps every moment, a
-sub-threshold candidate's transcript is *a* transcript, not *the* one, and
+non-confident candidate's transcript is *a* transcript, not *the* one, and
 printing it under a heading that reads like testimony is exactly the
 misdiagnosis recount was built to prevent. The path is printed, so
 `recount grep` is one command away for a reader who decides the evidence
@@ -220,7 +230,9 @@ Read one event out of `.pact/events.jsonl` and run `at` on it: one command from
 an audit finding to the agent's own words. `--event-line` is 1-based over
 *physical* lines, so `--event-line 5` is the line `sed -n 5p` shows, whether or
 not line 5 parsed. A line past the end is a hard error naming the ledger's
-length, exit 1.
+length, exit 1. So are line 0, a line that did not parse, and a repo with no
+`.pact/events.jsonl` at all — the last named as a missing ledger rather than as
+"the ledger has 0 lines", which would send you looking for a truncated file.
 
 `explain` resolves more than `at` can from the command line, because it is the
 only command that reads an event. The row carries the worktree it was invoked
@@ -276,8 +288,10 @@ schematic:
   `agents`, `annotations`, `per_agent` and `top_contended`;
 * inside an element the agent and the moment are found by *name shape* —
   `agent`, `*_agent`, plus the aliases pact's own structs use (`incoming_agent`,
-  `refused_agent`, `acquired_by`, `holder`, `author`); `at`, `*_at`, `since`;
-* a `line`, `incoming_line` or `opened_line` is taken as a ledger line, which is
+  `refused_agent`, `acquired_by`, `released_by`, `holder`, `author`); `at`,
+  `*_at`, `since`;
+* a positive `line`, or any `*_line` (`incoming_line`, `opened_line` and
+  `since_line` first), is taken as a ledger line, which is
   how a finding reaches the whole attribution chain and, with it, the **keyed
   tier** — see [join.md](join.md).
 
@@ -306,9 +320,9 @@ is reported as unanswered.
 Malformed input is neither: it is a hard error, one sentence on stderr and no
 document at all.
 
-A sub-threshold candidate counts as untestified and is printed with its
-evidence and **without** its transcript, for the reason
-[`at`](#recount-at) withholds it: a guess under a heading that reads like
+A candidate that is not confident — below the bar, or a lead — counts as
+untestified and is printed with its evidence and **without** its transcript,
+for the reason [`at`](#recount-at) withholds it: a guess under a heading that reads like
 testimony is the misdiagnosis recount was built to prevent.
 
 The declared-versus-recorded [model comparison](#declared-model-versus-recorded-model)
@@ -406,7 +420,7 @@ never absent.
                          "turn_count": …, "parse_failures": …, "declined": …,
                          "connector": "claude_code" },
             "tier": "keyed" | "topological",
-            "confidence": 0.65,             // null when "tier" is "keyed"
+            "confidence": 0.95,             // null when "tier" is "keyed"
             "confident": true,
             "lead": false,                  // true = the chain did not discriminate: never confident
             "evidence": [ { "signal": "keyed" | "topology" | "time_overlap"
@@ -475,7 +489,7 @@ failed comparison.
               "untestified": 1,             // had an agent and a moment, got no confident match
               "passed_through": 0 },        // had neither; not a failure
   "findings": [ {
-      "check": "stale_holds",               // the array it came out of
+      "check": "stale_holds",               // the array it came out of; "findings" for a bare array
       "index": 0,
       "agent": <name|null>,                 // null on a pass-through
       "ts": <rfc3339|null>,

@@ -704,8 +704,12 @@ bad line never fails a file". Against the format above that means:
    read `sessionId` and fall back.
 2. **Match `type` as a string with a catch-all arm.** Nineteen kinds today; two
    of them (`atis-latch`, `frame-link`) have 1 and 5 occurrences and are
-   plainly new. An unknown `type` is a *skip*, tallied in `doctor`, never an
-   error. Likewise `block.type` (`fallback` already exists and is undocumented).
+   plainly new. An unknown `type` is a *skip*, never an error. Likewise
+   `block.type` (`fallback` already exists and is undocumented).
+   *As built, the skip is not tallied* (§9.1): an unknown kind is the format's
+   structure, not a loss, and counting it would bury the lines recount actually
+   failed or declined to read. A block of unknown type is rendered as
+   `[<type>]` rather than dropped.
 3. **Per-line error containment.** `for line in reader.lines()`: a JSON error
    increments `parse_failures` for that file and `continue`s. A file yields
    `(Vec<Turn>, ParseStats)`, never `Result<Vec<Turn>>`. Zero bad lines were
@@ -724,18 +728,19 @@ bad line never fails a file". Against the format above that means:
    satisfies; the benign/damaged distinction is a `SessionMeta` change if
    anyone ever wants it.
    *And there is a third case, measured in §5.1 and not hypothetical:* a line
-   **over the 8 MB cap** is also one `parse_failure`. On this machine that is
-   **all 12 of them** — every failure `doctor` reports is a line recount
-   declined to read, in a file with nothing wrong with it. So one `usize`
-   currently conflates damage, a benign truncated tail, and recount's own
-   configuration, and `doctor` reports the union as "damaged". If any of the
-   three is ever worth acting on differently, this is the field that has to
-   grow.
+   **over the 8 MB cap**. On this machine that was **all 12** of what `doctor`
+   reported — every one a line recount declined to read, in a file with
+   nothing wrong with it. It used to be one `parse_failure` too, and `doctor`
+   reported the union as "damaged". That one is fixed: `SessionMeta` grew a
+   `declined` counter, an over-cap line is counted there and never as damage,
+   and `doctor` prints the two separately. What remains conflated is the first
+   two cases — damage and a benign truncated tail — in `parse_failures`.
 5. **Cap line length.** 8 MB, skip-and-count above it. **31** real lines
    exceed 1 MB; **12** exceed 10 MB and all 12 are over the cap; the largest is
    16.4 MB. Those 12 are not binary dumps — they are one runaway prompt,
    retried six times (§5.1) — so count them somewhere a human can tell "we
-   didn't read this" from "this is broken".
+   didn't read this" from "this is broken". As built, that is
+   `SessionMeta.declined` (`MAX_LINE_BYTES` in `src/connector/claude_code.rs`).
 6. **`content` is `String | Vec<Block>`.** An untagged enum, or match on
    `Value::String` vs `Value::Array`. Same again one level down for
    `tool_result.content`.
@@ -844,7 +849,7 @@ The gaps all run the other way, and two of them are worth an argument.
 |---|---|---|---|
 | `type` (top level) | kind switch; anything but `assistant`/`user`/`attachment`/`system` is skipped **without** being tallied | the line's fate | §2 |
 | `cwd` | tallied per distinct value, most-frequent-first | `SessionMeta.cwd` + `Identity.cwds` | §4.1, §4.2 |
-| `timestamp` | on a line that would become a turn; missing or unparseable is a counted failure | `Turn.ts` | §2.2, §6.1 |
+| `timestamp` | `assistant`, `user`, `system` — checked before a `system` line's `content` is, so a content-less one still needs it; missing or unparseable is a counted failure | `Turn.ts` | §2.2, §6.1 |
 | `sessionId`, then `session_id` | first non-empty on any line | `Identity.session_id` | §3.1, §7.1 |
 | `agentId` | first non-empty on any line | `Identity.agent_id` | §3.1, §3.4 |
 | `message.content` | `assistant`, `user` | `Turn.text` | §2.2, §2.3 |
@@ -1107,11 +1112,11 @@ newest file — §10.2 is what fallbacks cost here.
 
 Three outcomes, and the last two are different news:
 
-| Outcome | Means | What a human should do |
+| Outcome (`Keyed::…`) | Means | What a human should do |
 |---|---|---|
-| resolved | the file is on disk | read it |
-| **absent** | the path is right, nothing is at it | look elsewhere — pruned (§0.0), or the ledger came from another machine |
-| **malformed** | the id is not an id | look at the ledger; nothing was stat'd |
+| resolved (`Found`) | the file is on disk | read it |
+| **absent** (`Absent`) | the path is right, nothing is at it | look elsewhere — pruned (§0.0), or the ledger came from another machine |
+| **malformed** (`Malformed`) | the id is not an id | look at the ledger; nothing was stat'd |
 
 The ids are validated as **opaque tokens**: non-empty, `[A-Za-z0-9-]` only.
 Not a uuid check and not a hex check, on purpose — a stricter grammar would
@@ -1218,8 +1223,15 @@ For the comparison bead, with the caveats that make it honest:
   patch and it is a guess about a naming convention nobody published; a
   "differs" that a human reads and dismisses beats a silent normalisation that
   hides a real switch.
+  *The comparison as built went the other way, narrowly* (`undated` in
+  `src/cmd/at.rs`): it strips a trailing `-` plus exactly eight ASCII digits
+  from both sides before comparing, on the argument that an exact compare
+  accuses an agent that did what it was told. That is not prefix matching —
+  `claude-opus-5` still differs from `claude-opus-5-1` — but it is a
+  normalisation, and a dated slug and its undated declaration now agree.
 - **A set, not a value.** A file can legitimately record two models (§11.1). A
-  declared model that is *among* them is not a discrepancy.
+  declared model that is *among* them is not a discrepancy. As built, that is
+  its own verdict, `switched`, beside `agrees` and `differs`.
 - **Empty is silence.** A file with no assistant line — 29 of them in this
   corpus, plus every pruned transcript — records no model. There is nothing to
   compare and that is not a finding, not a warning and above all not an error.

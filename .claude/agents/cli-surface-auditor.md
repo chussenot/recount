@@ -79,7 +79,7 @@ Help text refers to other things by name. Each kind is checkable:
 
 - **another flag or subcommand** — does it still exist under that exact spelling?
 - **a `docs/*.md` path or a README section** — does it exist? The top-level
-  `long_about` points at "`Where recount is weak`" in the README by name.
+  `long_about` points at `docs/limitations.md` by path.
 - **a JSON field** — `doctor --help` names `.join_readiness.ready`. Run
   `recount --json doctor` and check the path is really there.
 - **a file the tool reads** — `.pact/events.jsonl` is named in several places.

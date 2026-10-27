@@ -24,7 +24,7 @@ run = "cargo test"
 description = "Measure the two ceilings docs/spec.md sets (release, ~193 MB corpus, minutes)"
 # Release is not optional and the task encodes it rather than trusting a human to
 # remember: tests/bench.rs refuses to assert under debug_assertions, and the same
-# grep is 35.9 s in debug versus ~1.06 s in release.
+# grep measured 35.9 s in debug versus 2.83 s in release (tests/bench.rs).
 #
 # Deliberately NOT part of `check`: it writes a ~193 MB corpus into a tempdir and
 # takes minutes. A required gate with those properties is one people disable.
@@ -75,7 +75,7 @@ run = [
   # The tool's first testimony is about its own birth: event 1 is this repo's
   # first pact context row, and it resolves to the session holding the prompt
   # that created recount. Exit 1 here is a REASONED refusal, not a failure —
-  # see the 'Where recount is weak' section of the README — so do not let it
+  # see docs/limitations.md — so do not let it
   # stop the task.
   "./target/debug/recount explain --repo . --event-line 1 || true",
 ]

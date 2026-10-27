@@ -8,8 +8,10 @@ holds the seam and the rules below; the two implementations are
 ## The trait
 
 `docs/spec.md` writes it as two methods — `discover()` and `read(path)` — "so a
-third is one file — but do not add one". The code has those two, plus two that
-exist only so `doctor` can report honestly:
+third is one file — but do not add one". The code has those two, plus two the
+spec does not name: `roots()`, so `doctor` can report honestly, and `name()`,
+which is how a caller matches a `SessionMeta` back to the connector that can
+`read` it:
 
 | method | what it is for |
 |---|---|
@@ -19,8 +21,8 @@ exist only so `doctor` can report honestly:
 | `name()` | the stable id stored on every `SessionMeta` and printed by `doctor` |
 
 `discover` takes the directories rather than rediscovering them, and that is a
-deliberate departure from the spec's `discover()`, recorded in the README's
-deviations section. The spec requires both that `--repo` resolve to the
+deliberate departure from the spec's `discover()`, recorded in
+[architecture.md](architecture.md#departures-from-the-spec). The spec requires both that `--repo` resolve to the
 project's encoded session directories "before any file opens" and that mtime
 "prune files outside the query window unopened". Those are the same requirement
 seen from the caller's side: the scope has to reach the connector before the
@@ -31,7 +33,7 @@ there" is the answer a person needs. `generic_jsonl` declares none, and
 `doctor` prints "roots: none declared" rather than inventing a plausible path —
 a made-up root reads as a place recount looked and found empty.
 
-**No third method was added for claiming.** A connector claims a path by
+**No method was added for claiming.** A connector claims a path by
 returning a `SessionMeta` for it; `discover_all` records the claim. A
 `claims(path) -> bool` method would be a second place for the same decision to
 live, and the two would drift.
@@ -43,9 +45,12 @@ registration macro, no inventory crate, no factory keyed by string.
 ## The two
 
 **`claude_code`** — sessions under `~/.claude/projects/<encoded-path>/*.jsonl`,
-in both observed layouts: the top-level `<session-uuid>.jsonl` and the nested
-`<session-uuid>/subagents/agent-<hex>.jsonl`. Three quarters of a real corpus is
-in the nested shape, and all of the fleet testimony recount exists to retrieve.
+in every observed layout: the top-level `<session-uuid>.jsonl`, the nested
+`<session-uuid>/subagents/agent-<hex>.jsonl`, and the workflow-nested
+`<session-uuid>/subagents/workflows/wf_<id>/agent-<hex>.jsonl`. Discovery walks
+the whole tree and drops only `journal.jsonl`. Three quarters of a real corpus is
+in the two subagent shapes, and all of the fleet testimony recount exists to
+retrieve.
 The format is reverse-engineered, not documented by anyone: every field this
 connector reaches for cites a section of [format-notes.md](format-notes.md),
 which carries its own "expect drift" warning.
@@ -66,11 +71,11 @@ smallest thing that can: one path join and one `is_file()`.
 <project_dir>/<session>/subagents/agent-<subagent>.jsonl   subagent: Some
 ```
 
-It is **not a fifth trait method**, for the same reason claiming is not a third
-one: it is specific to a format that happens to name its files after its ids,
-and putting it on the trait would ask `generic_jsonl` to have an opinion about
-a key it has never heard of. The join calls the free function directly and
-`Keyed` is its own type, not an `Option<PathBuf>`:
+It is **not a fifth trait method**, for the same reason claiming is not a
+method at all: it is specific to a format that happens to name its files after
+its ids, and putting it on the trait would ask `generic_jsonl` to have an
+opinion about a key it has never heard of. The join calls the free function
+directly and `Keyed` is its own type, not an `Option<PathBuf>`:
 
 | outcome | means | what to do |
 |---|---|---|
@@ -148,9 +153,13 @@ The sidecar's own `model` key is a different thing and is still not read
 (§11.1): it is on 70 of 634 sidecars, and it holds the spawn-time alias the
 caller asked for (`sonnet`, `opus`, `haiku`), not the slug that answered.
 
-`Identity` is what `scan(path)` returns beside the `SessionMeta`, so this is
-connector-level today: as of 2026-08-20 no command prints `models` — `sessions`
-reaches for `scan` only for `cwds`.
+`Identity` is what `scan(path)` returns beside the `SessionMeta`. One command
+prints `models`: `explain`, and only when its event declared a model and the
+join's best match is confident — it compares the two and says `agrees`,
+`switched` or `differs` (`model_check` in `src/cmd/at.rs`, which also strips a
+trailing `-YYYYMMDD` from both sides, so a dated slug meets its undated
+declaration). A plain `at` has no declaration to compare and prints nothing.
+`sessions` reaches for `scan` only for `cwds`.
 
 ## The claim rule
 
@@ -205,12 +214,14 @@ machine.
 Two counters on `SessionMeta`, and the distinction is the whole point.
 
 - **`parse_failures` — damage.** A line the connector *tried* to read and could
-  not: not JSON, not a JSON object, or a testimony line whose timestamp will
-  not parse.
+  not. In `claude_code`: not JSON, not a JSON object, or a testimony line whose
+  timestamp will not parse. In `generic_jsonl` the line is drawn at whether
+  `serde_json` succeeded, so only a line that is not JSON counts here.
 - **`declined` — policy.** A line the connector *could* have read and chose not
   to, for a reason it can name. In `claude_code` that is exactly one thing
   today: a line over `MAX_LINE_BYTES` (`src/connector/claude_code.rs`). In
-  `generic_jsonl` it is a line that is perfectly good JSON but not turn-shaped.
+  `generic_jsonl` it is a line that is perfectly good JSON but not turn-shaped
+  — including a turn with no usable timestamp or role.
 - **Neither** covers a line kind the connector does not read. An `attachment`, a
   `queue-operation`: that is the format's structure, not a loss. Tallying
   10,309 attachments as "declined" would drown the twelve lines that actually
