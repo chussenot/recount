@@ -236,7 +236,7 @@ They were one counter once:
 
 What `doctor` prints now, on this machine, 2026-08-19, debug build at `457a254`:
 
-```
+```text
 connectors
   claude_code    843 sessions, 12 lines declined, 0 damaged
                  root: /home/chussenot/.claude/projects (exists)
@@ -244,7 +244,7 @@ connectors
                  roots: none declared
 ```
 
-```
+```text
 findings
   - connector claude_code: 12 lines declined across 6 of 843 sessions — recount chose not to read them (over its line-size cap, or a shape this connector does not take); 0 damaged, so nothing under this root is corrupt
 ```
@@ -266,7 +266,7 @@ rather than carrying forever as sessions that have no cwd.
 There are none of those under this repo, so the check has to be run somewhere
 that has them:
 
-```
+```console
 $ recount --json sessions --repo /home/chussenot/Documents/pact \
     | jq -c '[.sessions[].connector] | group_by(.) | map({connector:.[0], sessions:length})'
 [{"connector":"claude_code","sessions":242},{"connector":"generic_jsonl","sessions":12}]

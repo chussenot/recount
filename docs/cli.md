@@ -70,7 +70,7 @@ Seven subcommands. `--json` is global and works on all of them.
 
 ### `recount sessions`
 
-```
+```text
 recount sessions --repo <PATH> [--since <WHEN>] [--until <WHEN>] [--json]
 ```
 
@@ -110,7 +110,7 @@ before it.
 
 ### `recount at`
 
-```
+```text
 recount at --repo <PATH> --agent <NAME> --ts <RFC3339> [--window <DURATION>] [--json]
 ```
 
@@ -164,7 +164,7 @@ Run through [`recount explain`](#recount-explain), which is the only command
 that has an event, `at` prints what pact 0.11.0 stamped on that event before it
 prints its own answer:
 
-```
+```text
   chain    what pact stamped on the event itself
     harness           claude-code
     model             claude-opus-5 (declared — the PACT_MODEL the spawner asked for, …)
@@ -209,7 +209,7 @@ agent's would be an accusation dressed as a finding.
 
 ### `recount grep`
 
-```
+```text
 recount grep <NEEDLE> --repo <PATH> [--agent <NAME>] [--since <WHEN>] [--until <WHEN>] [--json]
 ```
 
@@ -225,7 +225,7 @@ every line contains the empty string, so that is not a search. No hits is exit
 
 ### `recount explain`
 
-```
+```text
 recount explain --repo <PATH> --event-line <N> [--window <DURATION>] [--json]
 ```
 
@@ -256,7 +256,7 @@ digest.
 
 ### `recount testify`
 
-```
+```text
 recount testify --repo <PATH> [--file <PATH>] [--window <DURATION>] [--json]
 ```
 
@@ -265,7 +265,7 @@ finding that carries an agent and a timestamp, run the join and attach the
 transcript window and the tier that produced it. This is the line the whole
 release exists to make possible:
 
-```
+```bash
 pact audit --check double-win --json | recount testify --repo .
 ```
 
@@ -287,13 +287,13 @@ pact's audit document has no `findings` key. Each check writes its own array —
 the element shapes differ per check. So the reader is structural, not
 schematic:
 
-* every top-level array is a finding list **except** the four statistics arrays
+- every top-level array is a finding list **except** the four statistics arrays
   `agents`, `annotations`, `per_agent` and `top_contended`;
-* inside an element the agent and the moment are found by *name shape* —
+- inside an element the agent and the moment are found by *name shape* —
   `agent`, `*_agent`, plus the aliases pact's own structs use (`incoming_agent`,
   `refused_agent`, `acquired_by`, `released_by`, `holder`, `author`); `at`,
   `*_at`, `since`;
-* a positive `line`, or any `*_line` (`incoming_line`, `opened_line` and
+- a positive `line`, or any `*_line` (`incoming_line`, `opened_line` and
   `since_line` first), is taken as a ledger line, which is
   how a finding reaches the whole attribution chain and, with it, the **keyed
   tier** — see [join.md](join.md).
@@ -341,7 +341,7 @@ much attention.
 
 ### `recount doctor`
 
-```
+```text
 recount doctor [--repo <PATH>] [--json]
 ```
 
@@ -360,7 +360,7 @@ Always exits 0. See [Exit codes](#exit-codes).
 
 ### `recount completion`
 
-```
+```text
 recount completion <SHELL>
 ```
 
@@ -562,8 +562,8 @@ No JSON. See [The `--json` contract](#the---json-contract).
 ## See also
 
 - [install.md](install.md) — building, installing, completions
-- [join.md](join.md) — the topological key, the score ladder, the two refusals
+- [join.md](join.md) — the keyed and topological tiers, the score ladder, the three refusals
 - [connectors.md](connectors.md) — what each connector claims and declines
-- [performance.md](performance.md) — the mtime prune and the two ceilings
+- [performance.md](performance.md) — the mtime prune and the three ceilings
 - [worked-example.md](worked-example.md) — one real finding, replayed
 - [development.md](development.md) — the gates, and why each exists

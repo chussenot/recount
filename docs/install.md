@@ -109,14 +109,14 @@ glibc version, and inside `FROM scratch` images.
 
 Verify what you downloaded. The checksums file covers every tarball:
 
-```
+```bash
 sha256sum -c SHA256SUMS
 ```
 
 Releases also carry a build provenance attestation, so you can confirm which
 workflow, commit and run produced a tarball rather than trusting the filename:
 
-```
+```bash
 gh attestation verify recount-<tag>-<triple>.tar.gz --repo <owner>/recount
 ```
 
@@ -137,10 +137,11 @@ Windows for the reason below. Both build from source.
   then be wrong in ways no test here would catch.
 - **The full test suite runs on Linux only.** The release builds each target on
   its own native runner and smoke-tests the binary it just produced — version,
-  the presence of `sessions`, `at`, `grep`, `explain`, `doctor` and
-  `completion` in `--help` (a list written into `release.yml`, which `testify`,
-  added in 0.2.0, is not on), `doctor` in an empty directory, and completion
-  generation — but `cargo test` itself runs in one CI job on `ubuntu-latest`.
+  the presence in `--help` of every command [cli.md](cli.md#commands) documents
+  (read from its `### recount <cmd>` headings; until after 0.2.0 it was a
+  hardcoded list that missed `testify`), `doctor` in an empty directory, and
+  completion generation — but `cargo test` itself runs in one CI job on
+  `ubuntu-latest`.
   A macOS binary is therefore known to *run*, not known to *pass the suite*.
 
 These are stated rather than quietly implied, because a reader who assumes

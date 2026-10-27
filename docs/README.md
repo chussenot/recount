@@ -18,6 +18,7 @@ are trying to do; within a group, read top to bottom.
 | [cli.md](cli.md) | You need the exact contract: every command, flag, exit code and `--json` shape. Checked against the binary in CI. |
 | [limitations.md](limitations.md) | You are about to trust a score. Where the join is weak, where it is wrong, and how its output tells you. |
 | [worked-example.md](worked-example.md) | You want to see one real finding replayed end to end, including the tool giving a wrong answer. |
+| [troubleshooting.md](troubleshooting.md) | A command printed an error, a `doctor` finding or a refusal, and you want to know what it means and what to do. |
 
 ## How it works
 

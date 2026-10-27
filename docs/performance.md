@@ -70,7 +70,7 @@ rumour, so here are the conditions, and they are printed by the bench itself:
 
 Run on 2026-08-19 at `457a254` with `mise run bench`:
 
-```
+```text
 SPEC CEILING 1 — pruned `at`, answering path            < 100 ms
   run 1     12.8 ms   run 2     12.4 ms   exit 0   [499 of 500 sessions pruned on mtime, unopened]
   MET — 12% of the ceiling
@@ -111,7 +111,7 @@ read-only against a real `~/.claude/projects` tree — here the one for
 `/home/chussenot/Documents/pact`: 1 session directory, 254 sessions, 173.1 MB,
 page cache warm-ish (whatever the OS held), same build and machine as above.
 
-```
+```text
 real unwindowed `grep`  run 1   1903.5 ms   run 2   1824.8 ms   [50692 turns searched]
 real   windowed `grep --since 24h`  run 1    129.3 ms   run 2    130.9 ms   [6 of 254 sessions survived the mtime prune]
   for scale: `recount sessions` over the same corpus — one discovery parse, no content
@@ -134,7 +134,7 @@ database.*
 The clause names windowed queries on a real corpus, and the bench measures
 exactly that:
 
-```
+```text
   real WINDOWED grep:      130.9 ms  -> NOT triggered. The mtime prune is doing its job; do not build the manifest.
   real UNWINDOWED grep:   1824.8 ms  (not what the clause names, but the worst case)
 ```

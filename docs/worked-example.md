@@ -30,7 +30,7 @@ output is cut, the cut is marked and counted — nothing is silently trimmed.
 
 The branch taken is **"if present"**. The presence check:
 
-```
+```console
 $ recount grep arkanoid --repo .
 recount grep "arkanoid" — /home/chussenot/Documents/recount
   window   since unbounded · until unbounded
@@ -56,7 +56,7 @@ The question a person actually has, looking at a pact ledger: *the first
 row of this ledger says agent `orchestrator` set a policy at 07:03:12 —
 why?* `explain` takes the line number and answers it.
 
-```
+```console
 $ recount explain --repo . --event-line 1
 recount explain — ./.pact/events.jsonl line 1
   event    2026-08-19T07:03:12.694912822+00:00 · agent `orchestrator`
@@ -136,7 +136,7 @@ cannot know that, and §2 is why it does not try.
 Now a question from later in the same ledger: *row 122 says `orchestrator`
 took the merge lock at 08:39:18 to merge `wt/cmdat` — what was it doing?*
 
-```
+```console
 $ recount explain --repo . --event-line 122
 recount explain — ./.pact/events.jsonl line 122
   event    2026-08-19T08:39:18.048242748+00:00 · agent `orchestrator`
@@ -230,7 +230,7 @@ Sweeping `explain` over the whole ledger:
 Two thirds of this ledger refuses, and every refusal has the same reason.
 A representative one:
 
-```
+```console
 $ recount explain --repo . --event-line 133
 recount explain — ./.pact/events.jsonl line 133
   event    2026-08-19T08:45:48.747459802+00:00 · agent `cmdexplain`
@@ -319,7 +319,7 @@ to score. Run against the main checkout — the copy inside a worktree is a
 stale git checkout, so `--repo` must point at
 `/home/chussenot/Documents/recount`:
 
-```
+```console
 $ recount explain --repo /home/chussenot/Documents/recount --event-line 207
 recount explain — /home/chussenot/Documents/recount/.pact/events.jsonl line 207
   event    2026-08-19T17:20:53.482236042+00:00 · agent `joinkeyed`
@@ -392,7 +392,7 @@ no score — to that session's top-level transcript, which is the parent's
 
 ## 5. A clean audit, and why that is the interesting case
 
-```
+```console
 $ pact audit --json | recount testify --repo .
 recount testify — /home/chussenot/Documents/recount
   source   stdin
