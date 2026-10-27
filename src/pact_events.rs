@@ -62,6 +62,7 @@
 //! filesystem: `events_path(repo).exists()`. Everything else can treat "no
 //! ledger" and "empty ledger" the same, which is what they are.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -130,6 +131,27 @@ impl Events {
             .binary_search_by_key(&n, |e| e.line)
             .map(|i| &self.events[i])
             .map_err(|_| anyhow!("line {n} of {} did not parse as an event", self.line_count))
+    }
+
+    /// Every distinct agent the ledger records writing a SESSION-ONLY row — a
+    /// `harness_session` with no `harness_subagent` — under `session`, sorted.
+    ///
+    /// The keyed tier needs this because a session-only row cannot prove a
+    /// top-level agent wrote it: a subagent inherits its parent's session id,
+    /// so one that never resolved its own transcript id writes a row shaped
+    /// exactly like the parent's. One name here is consistent with the row
+    /// being an identity; two or more mean the ledger has attributed one
+    /// transcript to several agents, and [`crate::join`] answers such a row as
+    /// a lead rather than an identity.
+    pub fn session_only_agents(&self, session: &str) -> Vec<&str> {
+        let agents: BTreeSet<&str> = self
+            .events
+            .iter()
+            .filter(|e| e.harness_subagent.is_none())
+            .filter(|e| e.harness_session.as_deref() == Some(session))
+            .map(|e| e.agent.as_str())
+            .collect();
+        agents.into_iter().collect()
     }
 }
 
@@ -418,5 +440,34 @@ mod tests {
         // A directory where a file should be is still an error: that is a
         // broken .pact, not an absent one.
         assert!(read(dir.path()).is_err());
+    }
+
+    /// Who the ledger says wrote session-only rows under one session. Rows
+    /// with a subagent id are not session-only and do not count, rows under
+    /// another session do not count, and a repeated name counts once.
+    #[test]
+    fn session_only_agents_are_distinct_sorted_and_scoped_to_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.jsonl");
+        let row = |agent: &str, session: &str, sub: Option<&str>| {
+            let sub = sub.map_or(String::new(), |s| format!(r#","harness_subagent":"{s}""#));
+            format!(
+                r#"{{"at":"2026-08-19T07:13:57Z","agent":"{agent}","harness_session":"{session}"{sub}}}"#
+            )
+        };
+        let lines = [
+            row("orchestrator", "s1", None),
+            row("precheck", "s1", None),
+            row("orchestrator", "s1", None),
+            row("join", "s1", Some("abc")),
+            row("other", "s2", None),
+            r#"{"at":"2026-08-19T07:13:57Z","agent":"old"}"#.to_string(),
+        ];
+        std::fs::write(&path, lines.join("\n")).unwrap();
+        let ev = read(&path).unwrap();
+
+        assert_eq!(ev.session_only_agents("s1"), ["orchestrator", "precheck"]);
+        assert_eq!(ev.session_only_agents("s2"), ["other"]);
+        assert!(ev.session_only_agents("absent").is_empty());
     }
 }

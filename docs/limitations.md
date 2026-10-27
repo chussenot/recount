@@ -40,21 +40,27 @@ A keyed answer has no score because it is not inferred: the ledger row named the
 transcript. But a row that carries `harness_session` and no `harness_subagent`
 cannot prove a top-level agent wrote it. A subagent inherits its parent's session
 id, so one that skipped resolving its own transcript id writes a row shaped
-exactly like the orchestrator's — and recount answers it with the **parent's**
-transcript, tier `keyed`, no score, exit `0`. The row's `agent` field is the only
-thing that could contradict that, and the keyed tier does not read it.
+exactly like the orchestrator's, naming the **parent's** transcript.
 
-No case of this is measured: on this repository's own ledger every session-only
-row belongs to the orchestrator or the precheck. It is a hole in what a row can
-say rather than an observed miss — but when it happens, the answer is wrong with
-the authority of an identity, and no evidence line warns you.
-[join.md](join.md#what-the-keyed-tier-does-not-fix) has the detail.
+recount catches the visible half of this. When the ledger records more than one
+agent writing session-only rows under the same session, a keyed answer for any
+of them is a **lead**, not an identity: same file, `confident: false`, exit `1`,
+and the evidence line names the agents. This repository's own ledger trips it —
+35 `orchestrator` rows and one `precheck` row share a session — so all 36 now
+answer as leads, even though the one extra name was most likely the orchestrator
+acting under a second name. The row cannot say which, and an identity the ledger
+contradicts is not one. [join.md](join.md#what-the-keyed-tier-does-not-fix) has
+the detail.
+
+It cannot catch the other half: a subagent that skipped self-id in a session
+whose parent never wrote a session-only row of its own. The ledger then names one
+agent for the session — the subagent — and recount answers with the parent's
+transcript as an identity, exit `0`, no warning.
 
 **What to do about it:** make every subagent in your fleet resolve and export
 its own transcript id before its first pact command, so its rows carry
-`harness_subagent`. A keyed answer for an agent other than the orchestrator that
-names a top-level `<session>.jsonl`, not an `agent-<id>.jsonl`, is worth a
-second look.
+`harness_subagent`. And give the orchestrator one name: a second `PACT_AGENT` for
+the same session turns every one of its rows into a lead.
 
 ## recount is wrong on its own ledger, and its own output shows it
 

@@ -6,10 +6,10 @@
 # behaviour. So the count stops at the first top-level `#[cfg(test)]`, and the
 # whole file counts when there is none.
 #
-# Three files in this repo are over 800 TOTAL lines (join.rs 1057,
-# claude_code.rs 1025, sessions.rs ~1061) and all three are 553-597 lines of
-# code. A check that warned on those would be switched off within a week, which
-# is worse than no check.
+# Most of this repo's long files are long because of their tests: several are
+# well over 800 TOTAL lines and comfortably under it in code. A check that
+# warned on those would be switched off within a week, which is worse than no
+# check. The ones it does warn on are over in code, and the warning is meant.
 #
 # A warning, never a gate: an 850-line file is a conversation, not a build
 # break. Exit is always 0.

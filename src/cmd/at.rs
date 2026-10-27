@@ -103,7 +103,7 @@ use crate::cmd::{EXIT_NO_MATCH, EXIT_OK};
 use crate::connector::{self, Connector};
 use crate::join::{self, Match, Query, CONFIDENT};
 use crate::model::{Evidence, SessionMeta, Signal, Tier, TimeWindow, Turn};
-use crate::pact_events::Event;
+use crate::pact_events::{self, Event};
 use crate::worktree::{self, Worktree};
 
 /// Bumped only when a field leaves or changes meaning, like every other
@@ -168,6 +168,19 @@ fn resolve(args: &AtArgs, event: Option<&Event>, bead: Option<&str>) -> Result<R
         .first()
         .map_or_else(|| args.repo.clone(), |w| w.path.clone());
 
+    // Who else the ledger says wrote session-only rows under this event's
+    // session — the one question the event cannot answer about itself, and
+    // only asked of a session-only row, the one shape a subagent can forge by
+    // omission. A ledger that cannot be read leaves it empty: the row keys as
+    // it always did, which is the behaviour before this check existed.
+    let ledger = event
+        .filter(|e| e.harness_subagent.is_none() && e.harness_session.is_some())
+        .and_then(|_| pact_events::read(&pact_events::events_path(&args.repo)).ok());
+    let session_agents = match (&ledger, event.and_then(|e| e.harness_session.as_deref())) {
+        (Some(l), Some(session)) => l.session_only_agents(session),
+        _ => Vec::new(),
+    };
+
     let query = Query {
         agent: &args.agent,
         at: args.ts,
@@ -179,6 +192,7 @@ fn resolve(args: &AtArgs, event: Option<&Event>, bead: Option<&str>) -> Result<R
         // `recount at` still resolves topologically, as it always did.
         harness_session: event.and_then(|e| e.harness_session.as_deref()),
         harness_subagent: event.and_then(|e| e.harness_subagent.as_deref()),
+        session_agents: &session_agents,
     };
     let mut report = decide(&query, &repo, &worktrees, &dirs, &connector::registry());
     attribute(&mut report, event);
@@ -291,11 +305,13 @@ struct Best {
     /// of the JSON never has to know the threshold — or the lead rule — to
     /// know the verdict.
     confident: bool,
-    /// The chain filtered but did not discriminate, so the transcript mention
-    /// decided and this answer is a LEAD: never `confident`, whatever
-    /// `confidence` says. A separate field because the two are separate facts
-    /// — a 0.40 that nothing spoke for and a 0.65 that a mention picked out
-    /// are both un-confident, and only the second is a lead worth following.
+    /// Nothing structural picked this session out, so this answer is a LEAD:
+    /// never `confident`, whatever `confidence` says. Topologically, the chain
+    /// filtered but did not discriminate — a 0.65 a mention picked out and a
+    /// 0.40 nothing spoke for are both leads. Keyed, the ledger attributes the
+    /// named top-level transcript to more than one agent. A separate field
+    /// from `confident` because "the score fell short" and "nothing could have
+    /// made this an answer" are different news.
     lead: bool,
     /// Turns inside the queried window. Empty unless `confident`.
     transcript: Vec<Turn>,
@@ -670,6 +686,22 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
 
     match r.outcome {
         Outcome::Match => transcript(r, w)?,
+        Outcome::LowConfidence
+            if r.best
+                .as_ref()
+                .is_some_and(|b| b.lead && b.tier == Tier::Keyed) =>
+        {
+            writeln!(
+                w,
+                "\n  no confident match — the event named this transcript, but the ledger \
+                 names more\n  than one agent for the session it belongs to, and the \
+                 keyed line above says\n  which. The file is the session's; whether it is \
+                 this agent's is what the\n  ledger cannot say. That makes this a LEAD — \
+                 somewhere to look, not the\n  answer. The transcript window is withheld: it \
+                 would read as testimony the\n  ledger does not support. The path is printed \
+                 if you decide otherwise."
+            )?
+        }
         Outcome::LowConfidence if r.best.as_ref().is_some_and(|b| b.lead) => writeln!(
             w,
             "\n  no confident match — but NOT for either of the spec's two reasons, and \
@@ -947,6 +979,7 @@ mod tests {
             bead: None,
             harness_session: None,
             harness_subagent: None,
+            session_agents: &[],
         }
     }
 
@@ -1525,6 +1558,23 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("threshold"), "no bar to clear: {text}");
+
+        // A keyed answer the ledger contradicts is a lead, and says so in the
+        // keyed tier's own words — not the topological lead's, which would send
+        // the reader to a chain that was never consulted.
+        let mut contested = keyed;
+        contested.outcome = Outcome::LowConfidence;
+        let b = contested.best.as_mut().unwrap();
+        (b.confident, b.lead) = (false, true);
+        let text = text_of(&contested);
+        assert!(text.contains("tier keyed"), "{text}");
+        assert!(text.contains("LEAD — NOT CONFIDENT"), "{text}");
+        assert!(
+            text.contains("names more\n  than one agent for the session"),
+            "{text}"
+        );
+        assert!(!text.contains("The chain could not tell"), "{text}");
+        assert_eq!(contested.exit_code(), EXIT_NO_MATCH);
 
         // Below the bar the comparison is withheld with the transcript: the
         // recorded model of a session we do not believe is this agent's would

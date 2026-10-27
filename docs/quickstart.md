@@ -75,7 +75,7 @@ it. There are five outcomes:
 |---|---|---:|
 | `tier keyed` · no score | The ledger named the transcript (pact stamped `harness_session` / `harness_subagent` on the event). This is an identity, not a guess — provided the agent that wrote the row is the one it names ([limitations.md](limitations.md#a-keyed-answer-is-only-as-honest-as-the-row-that-named-it)). | `0` |
 | `confidence 0.70` or `0.95` · `CONFIDENT` | The worktree singled the session out. An answer that stands on its own. | `0` |
-| `LEAD — NOT CONFIDENT` | The worktree could only *filter* — several sessions share it, typically subagents of one parent — and a transcript mention picked this one, or nothing did. Somewhere to look, not an answer. | `1` |
+| `LEAD — NOT CONFIDENT` | Nothing structural picked this session out. Usually the worktree could only *filter* — several sessions share it, typically subagents of one parent — and a transcript mention picked this one, or nothing did. With `tier keyed`, the ledger names more than one agent for the session the event named. Somewhere to look, not an answer. | `1` |
 | `NOT CONFIDENT` | A candidate scored below the bar. | `1` |
 | a refusal: `no cwd match`, `no overlap` or `no keyed transcript` | No candidate at all. The reason tells you where to look next: the topology, the clock, or the transcript store. | `1` |
 

@@ -53,7 +53,7 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -127,6 +127,7 @@ pub fn run(args: &TestifyArgs, json: bool) -> Result<u8> {
     let doc: Value = serde_json::from_str(&text).with_context(|| {
         format!("{source} is not JSON — testify reads a `pact audit --json` document")
     })?;
+    shape(&doc, &source)?;
 
     let report = resolve(args, &doc, source)?;
     emit(
@@ -231,6 +232,15 @@ fn annotate(
         };
         let event = raw.event_line().and_then(|n| ledger?.line(n).ok());
         let bead = event.and_then(bead);
+        // Asked only of a session-only row — see `Query::session_agents`.
+        let session_agents = match (ledger, event) {
+            (Some(l), Some(e)) if e.harness_subagent.is_none() => e
+                .harness_session
+                .as_deref()
+                .map(|session| l.session_only_agents(session))
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
         let query = Query {
             agent: &agent,
             at: ts,
@@ -239,6 +249,7 @@ fn annotate(
             bead,
             harness_session: event.and_then(|e| e.harness_session.as_deref()),
             harness_subagent: event.and_then(|e| e.harness_subagent.as_deref()),
+            session_agents: &session_agents,
         };
         let window = TimeWindow::around(ts, args.window);
         let t = match join::resolve(&query, worktrees, sessions, turns) {
@@ -254,7 +265,10 @@ fn annotate(
                 untestified.push(format!(
                     "{where_} agent `{agent}` at {} — {}: tier {} ({})",
                     stamp(ts),
-                    if m.lead {
+                    if m.lead && m.tier == Tier::Keyed {
+                        "a LEAD, not an answer — the event named this transcript, but the \
+                         ledger names more than one agent for its session"
+                    } else if m.lead {
                         "a LEAD, not an answer — the chain did not discriminate, so no \
                          score it reaches is confident"
                     } else {
@@ -362,14 +376,45 @@ fn pick<T>(
         .find_map(get)
 }
 
+/// Refuse a document that is JSON but cannot hold a finding — a number, a
+/// string, a boolean, `null`.
+///
+/// These used to read as an audit with no findings, which exits 0: a clean
+/// audit. `echo 17 | recount testify` is a broken pipeline, and the one
+/// answer it must not get is "nothing to report". Malformed input is a hard
+/// error, the same as input that is not JSON at all.
+fn shape(doc: &Value, source: &str) -> Result<()> {
+    let kind = match doc {
+        Value::Object(_) | Value::Array(_) => return Ok(()),
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+    };
+    bail!(
+        "{source} is JSON but not an audit: it is {kind}. testify reads a `pact audit --json` \
+         document, an array of findings, or one finding object"
+    )
+}
+
 /// Every finding in the document, in a stable order.
 ///
 /// Three input shapes, because all three turn up: the whole `pact audit --json`
 /// object; a bare array, which is what `jq '.stale_holds'` hands over; and a
 /// single finding object, which is what `jq '.stale_holds[0]'` hands over.
+///
+/// An object is ONE finding when it carries an agent and a moment, or when it
+/// holds something but no array at all; otherwise it is a document whose
+/// arrays are the checks — `{}` included, an audit with no checks in it. Both halves are needed. An audit document always carries arrays
+/// (`agents`, `per_agent`, …) and never a top-level agent or moment, while a
+/// finding may carry an array of its own — retry-storm's `lines` — and one
+/// with no agent, a topology mismatch, may carry nothing that names one.
 fn raw_findings(doc: &Value) -> Vec<Raw> {
     match doc {
         Value::Array(items) => numbered("findings", items),
+        Value::Object(o) if is_one_finding(doc, o) => {
+            numbered("finding", std::slice::from_ref(doc))
+        }
         Value::Object(o) => o
             .iter()
             .filter(|(k, _)| !NOT_FINDINGS.contains(&k.as_str()))
@@ -378,6 +423,15 @@ fn raw_findings(doc: &Value) -> Vec<Raw> {
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn is_one_finding(doc: &Value, o: &Map<String, Value>) -> bool {
+    let probe = Raw {
+        check: String::new(),
+        index: 0,
+        value: doc.clone(),
+    };
+    probe.agent_and_ts().is_some() || (!o.is_empty() && !o.values().any(Value::is_array))
 }
 
 fn numbered(check: &str, items: &[Value]) -> Vec<Raw> {
@@ -638,9 +692,14 @@ fn digest(r: &Report, w: &mut dyn Write) -> io::Result<()> {
     writeln!(
         w,
         "  input    {}",
-        match &r.check {
-            Some(c) => format!("pact audit --check {c}"),
-            None => "pact audit summary (no --check)".to_string(),
+        // A bare array or a single finding has no document around it, and so no
+        // `check` to name — which is not the same thing as a summary.
+        match (&r.check, r.findings.first().map(|f| f.check.as_str())) {
+            (Some(c), _) => format!("pact audit --check {c}"),
+            (None, Some("findings" | "finding")) => {
+                "findings on their own, without the audit document around them".to_string()
+            }
+            (None, _) => "pact audit summary (no --check)".to_string(),
         }
     )?;
     writeln!(
@@ -1078,11 +1137,15 @@ mod tests {
                 format!("stdin is not JSON — testify reads a `pact audit --json` document: {e}");
             assert!(msg.contains("is not JSON"), "{msg}");
         }
-        // And a document that IS JSON but is not an object or an array is not
-        // an error either — it simply has no findings.
-        assert!(raw_findings(&json!(7)).is_empty());
-        assert!(raw_findings(&json!("nope")).is_empty());
-        assert!(raw_findings(&Value::Null).is_empty());
+        // And a document that IS JSON but cannot hold a finding is an error
+        // too. It used to read as an empty audit and exit 0 — "nothing to
+        // report" — which is the one answer a broken pipeline must not get.
+        for scalar in [json!(7), json!("nope"), json!(true), Value::Null] {
+            let e = shape(&scalar, "stdin").unwrap_err().to_string();
+            assert!(e.contains("is JSON but not an audit"), "{e}");
+        }
+        assert!(shape(&json!({}), "stdin").is_ok());
+        assert!(shape(&json!([]), "stdin").is_ok());
     }
 
     /// `--file` and stdin are the same input, and say so differently.
@@ -1147,9 +1210,29 @@ mod tests {
         assert_eq!(r.findings[0].check, "findings");
         assert_eq!(r.findings[1].index, 1);
 
-        // A single object has no array to walk, so it yields nothing rather
-        // than pretending its scalar fields are findings.
-        assert!(raw_findings(&one).is_empty());
+        // A single finding object is one finding, under its own check name.
+        // It used to yield nothing — a clean audit, exit 0 — while
+        // `raw_findings`' own doc promised to read it.
+        let r = run_over(&one, &[skeleton_session()], Vec::new());
+        assert_eq!(r.totals.findings, 1);
+        assert_eq!(r.findings[0].check, "finding");
+
+        // Even one carrying an array of its own, as retry-storm's does: the
+        // agent and the moment say what it is.
+        let storm = json!({ "agent": "skeleton", "first_refusal_at": NOON, "lines": [3, 4] });
+        assert_eq!(raw_findings(&storm).len(), 1);
+        assert_eq!(raw_findings(&storm)[0].check, "finding");
+
+        // And one naming no agent at all is still one finding, passed through
+        // rather than dropped.
+        let mismatch = json!({ "invoked_from": "main", "events": 3 });
+        let r = run_over(&mismatch, &[], Vec::new());
+        assert_eq!((r.totals.findings, r.totals.passed_through), (1, 1));
+
+        // A whole document is not mistaken for one finding.
+        let doc = json!({ "check": "all", "agents": [], "stale_holds": [one.clone()] });
+        assert_eq!(raw_findings(&doc).len(), 1);
+        assert_eq!(raw_findings(&doc)[0].check, "stale_holds");
     }
 
     /// The field sweep, on shapes taken from pact's own structs — and on one

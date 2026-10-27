@@ -89,7 +89,8 @@
 //!
 //! # Is `generic_jsonl` reachable through `--repo`?
 //!
-//! Essentially no, and never for a real Claude Code transcript. `--repo`
+//! Yes, but only for what `claude_code` declines, and never for a real Claude
+//! Code transcript. `--repo`
 //! resolves to this repo's encoded session directories
 //! ([`crate::worktree::session_dirs`]), which are `claude_code`'s own tree, so
 //! every transcript found there is claimed above it. The only paths that reach

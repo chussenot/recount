@@ -147,9 +147,20 @@ pub struct Query<'a> {
     /// the directory a subagent transcript lives under. Half of the exact key.
     pub harness_session: Option<&'a str>,
     /// The event's `harness_subagent`: the id of the transcript the event was
-    /// written from. **This field alone gates the keyed tier** — see
-    /// [`resolve`]. Its absence is a normal state, not a degraded one.
+    /// written from. With [`Self::harness_session`] it gates the keyed tier —
+    /// see [`resolve`]. Its absence is a normal state, not a degraded one.
     pub harness_subagent: Option<&'a str>,
+    /// Every distinct agent the ledger records writing a session-only row under
+    /// [`Self::harness_session`] ([`crate::pact_events::Events::session_only_agents`]).
+    /// Empty when the caller had no ledger to ask, which `at` without an event
+    /// never needs: it carries no session id to key by.
+    ///
+    /// Read only for a session-only row. A subagent inherits its parent's
+    /// session id, so a subagent that never resolved its own transcript id
+    /// writes a row shaped exactly like the parent's; when this lists more than
+    /// one agent, the ledger has attributed one top-level transcript to several,
+    /// and the keyed answer is a lead rather than an identity.
+    pub session_agents: &'a [&'a str],
 }
 
 /// A session, with which tier answered and why we believe it.
@@ -178,9 +189,13 @@ pub struct Match {
     /// renderer that finds it empty is looking at a keyed answer, which never
     /// consulted the clock and does not depend on it.
     pub in_window: Vec<Turn>,
-    /// The chain filtered but did not discriminate, so what picked THIS
-    /// session out of its siblings was the transcript mention. Such an answer
-    /// is a **lead**: printed, scored, evidenced — and never confident.
+    /// Nothing structural picked THIS session out, so the answer is a **lead**:
+    /// printed, evidenced — and never confident. Two ways to get here. On the
+    /// topological tier, the chain filtered but did not discriminate, so the
+    /// transcript mention decided, or nothing did. On the keyed tier, the row
+    /// named a top-level transcript the ledger also attributes to another
+    /// agent ([`Query::session_agents`]), so the file is the session's and may
+    /// not be this agent's.
     ///
     /// This is a second, structural bar beside [`CONFIDENT`], and it is
     /// deliberately not expressed as a number. Raising the threshold to 0.7
@@ -193,10 +208,10 @@ pub struct Match {
     /// "orchestrator" in every ten-minute stretch of itself. A signal that is
     /// true of every candidate cannot cast a deciding vote.
     ///
-    /// Always `false` on a keyed answer: the keyed tier never consulted a cwd,
-    /// a clock or a transcript, so there was no tie for a mention to break.
-    /// Apply it with [`Match::confident`], never by reading the field beside a
-    /// hand-rolled threshold comparison.
+    /// `false` on every keyed answer the ledger does not contradict: the keyed
+    /// tier never consulted a cwd, a clock or a transcript, so there was no tie
+    /// for a mention to break. Apply it with [`Match::confident`], never by
+    /// reading the field beside a hand-rolled threshold comparison.
     pub lead: bool,
 }
 
@@ -208,8 +223,9 @@ impl Match {
     /// score can fall short of [`CONFIDENT`], or the chain can have failed to
     /// discriminate at all, in which case no score it happens to reach means
     /// anything ([`Match::lead`]). [`Tier::clears`] is still the one place the
-    /// *number* is compared — a keyed answer clears every bar and is never a
-    /// lead — so nothing here re-derives a threshold.
+    /// *number* is compared — a keyed answer clears every bar, and is a lead
+    /// only when the ledger contradicts it — so nothing here re-derives a
+    /// threshold.
     pub fn confident(&self) -> bool {
         !self.lead && self.tier.clears(CONFIDENT)
     }
@@ -223,8 +239,9 @@ impl Match {
 ///
 /// The spec named the first two. The third arrived with the keyed tier and
 /// belongs to it exclusively — it is reachable only for an event carrying a
-/// `harness_subagent`. Collapsing it into [`Refusal::NoCwdMatch`] would send an
-/// auditor to look at cwds when no cwd was ever consulted.
+/// `harness_session` or a `harness_subagent`. Collapsing it into
+/// [`Refusal::NoCwdMatch`] would send an auditor to look at cwds when no cwd
+/// was ever consulted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 // A list of refusals is a list of negatives, so of course they share a prefix.
@@ -492,7 +509,7 @@ fn keyed(
     let mut looked: Vec<PathBuf> = Vec::new();
     for w in worktrees {
         match claude_code::keyed(&w.session_dir, session, subagent) {
-            Keyed::Found(path) => return keyed_match(path, session, subagent, sessions),
+            Keyed::Found(path) => return keyed_match(query, path, session, subagent, sessions),
             Keyed::Absent(path) => looked.push(path),
             // Decided by the ids alone, so the first directory settles it for
             // every directory: this is a bad id, not a missing file, and
@@ -541,6 +558,7 @@ fn keyed(
 /// The transcript is on disk. Turn it into an answer, or say why the sessions
 /// the join was offered do not contain it.
 fn keyed_match(
+    query: &Query,
     path: PathBuf,
     session: &str,
     subagent: Option<&str>,
@@ -563,6 +581,21 @@ fn keyed_match(
             ),
         });
     };
+    // A session-only row the ledger contradicts: the same file, found the same
+    // way, but the ledger has named more than one agent for it. Still the keyed
+    // tier — nothing was inferred, and the ladder would only replace a pointer
+    // to the right session with a tie broken by path order — but not an
+    // identity, so not confident. Rows with a subagent id are never contested:
+    // `agent-<id>.jsonl` is one agent's file by construction.
+    let contested = (subagent.is_none() && query.session_agents.len() > 1).then(|| {
+        let names: Vec<String> = query
+            .session_agents
+            .iter()
+            .map(|a| format!("`{a}`"))
+            .collect();
+        format!("{} agents ({})", names.len(), names.join(", "))
+    });
+
     // Same tier, two sentences. A reader has to be able to tell "a subagent
     // wrote this" from "the agent that owns the session wrote this": both are
     // identities, but they answer different questions about who acted.
@@ -574,6 +607,21 @@ fn keyed_match(
              the topological ladder was not consulted",
             file_name(meta),
             path.display()
+        ),
+        None if contested.is_some() => format!(
+            "the event named a TOP-LEVEL session transcript: harness_session `{session}` \
+             with no harness_subagent is {}, found at {} by one path join and one stat. \
+             But the ledger records {} writing session-only rows under this one session, \
+             and one transcript ran one agent. A subagent inherits its parent's session id, \
+             so a subagent that never resolved its own transcript id writes a row exactly \
+             like this one — which means this file is the SESSION's, and may not be \
+             `{}`'s. THIS IS A LEAD, NOT AN IDENTITY: open the transcript and check who was \
+             speaking before you read it as testimony. The fix is upstream — every subagent \
+             exporting PACT_HARNESS_SUBAGENT — and the thing to look at is the ledger",
+            file_name(meta),
+            path.display(),
+            contested.as_deref().unwrap_or_default(),
+            query.agent
         ),
         None => format!(
             "the event named a TOP-LEVEL session transcript, not a subagent's: \
@@ -594,8 +642,10 @@ fn keyed_match(
         // identity does not depend on it: it is what the session was SAYING
         // around the moment, not what proves it was this session.
         in_window: Vec::new(),
-        // No candidate set, so no tie, so nothing for a mention to break.
-        lead: false,
+        // No candidate set, so no tie, so nothing for a mention to break — but
+        // a ledger that names several agents for one session has not stated
+        // whose this file is.
+        lead: contested.is_some(),
     })
 }
 
@@ -1161,6 +1211,7 @@ mod tests {
             bead: Some("recount-hwk.31"),
             harness_session: None,
             harness_subagent: None,
+            session_agents: &[],
         }
     }
 
@@ -1973,6 +2024,56 @@ mod tests {
             d.contains("the topological ladder was not consulted"),
             "{d}"
         );
+    }
+
+    /// A session-only row the ledger contradicts. A subagent that never
+    /// resolved its own transcript id writes its parent's session id and no
+    /// subagent id — a row shaped exactly like the parent's. Once the ledger
+    /// records two agents writing session-only rows under one session, the
+    /// top-level file is still the right file to look in, and no longer an
+    /// identity for either of them.
+    #[test]
+    fn a_session_the_ledger_attributes_to_two_agents_is_keyed_as_a_lead() {
+        let (_td, wts) = keyed_tree();
+        let top = top_level_file(&wts[1]);
+        let sessions = vec![session_at(&top, Some("/r"))];
+
+        // One agent on record: the identity it always was.
+        let alone = Query {
+            session_agents: &["orchestrator"],
+            ..keyed_query("orchestrator", None)
+        };
+        let m = resolve(&alone, &wts, &sessions, &silent).unwrap();
+        assert!(!m.lead && m.confident(), "one writer is an identity");
+
+        // Two: same file, same tier, no score — and not confident.
+        let both = ["orchestrator", "precheck"];
+        for agent in both {
+            let q = Query {
+                session_agents: &both,
+                ..keyed_query(agent, None)
+            };
+            let m = resolve(&q, &wts, &sessions, &silent).unwrap();
+            assert_eq!(m.tier, Tier::Keyed, "nothing was inferred");
+            assert_eq!(m.session.path, top, "still the session's own file");
+            assert!(m.lead, "the ledger contradicts itself");
+            assert!(!m.confident(), "and a lead is never confident");
+            let d = &m.evidence[0].detail;
+            assert!(d.contains("2 agents (`orchestrator`, `precheck`)"), "{d}");
+            assert!(d.contains("THIS IS A LEAD, NOT AN IDENTITY"), "{d}");
+            assert!(d.contains(&format!("`{agent}`'s")), "{d}");
+            assert!(!d.contains("nobody's subagent"), "{d}");
+        }
+
+        // A subagent id is never contested: `agent-<id>.jsonl` is one agent's
+        // file whatever else the ledger says about the session.
+        let sub = keyed_file(&wts[1], SUB);
+        let q = Query {
+            session_agents: &both,
+            ..keyed_query("join", Some(SUB))
+        };
+        let m = resolve(&q, &wts, &[session_at(&sub, Some("/r"))], &silent).unwrap();
+        assert!(!m.lead && m.confident());
     }
 
     /// The same refusal as an absent subagent file, in words that fit a

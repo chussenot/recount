@@ -299,6 +299,37 @@ fn a_session_with_no_subagent_id_is_keyed_to_the_top_level_file() {
     );
 }
 
+/// Line 3 again, after a second agent has written a session-only row under the
+/// same session — what a subagent that skipped resolving its own transcript id
+/// leaves behind, because it inherits its parent's `harness_session`. The file
+/// is still the session's, so it is still the keyed tier's answer; it is no
+/// longer anyone's identity, so it is a lead and exits 1.
+#[test]
+fn a_session_the_ledger_gives_two_agents_is_keyed_as_a_lead() {
+    let f = tree("keyed-subagent.jsonl");
+    let ledger = f.repo().join(".pact").join("events.jsonl");
+    let rows = std::fs::read_to_string(&ledger).unwrap();
+    let line3 = rows.lines().nth(2).expect("the fixture has a line 3");
+    let forged = line3.replacen(r#""agent":"scribe""#, r#""agent":"precheck""#, 1);
+    assert_ne!(forged, line3, "the fixture's line 3 names agent `scribe`");
+    std::fs::write(&ledger, format!("{}\n{forged}\n", rows.trim_end())).unwrap();
+
+    let run = explain(&f, 3);
+    assert_eq!(run.code, 1, "a lead exits 1 — stderr:\n{}", run.stderr);
+    let doc = run.json();
+    assert_eq!(doc["best"]["tier"], "keyed", "nothing was inferred");
+    assert_eq!(doc["best"]["lead"], true);
+    assert_eq!(doc["best"]["confident"], false);
+    assert_eq!(
+        file_name(&best_path(&doc)),
+        format!("{SESSION}.jsonl"),
+        "still the session's own file"
+    );
+    let why = evidence(&doc, "keyed");
+    assert!(why.contains("`precheck`, `scribe`"), "{why}");
+    assert!(why.contains("THIS IS A LEAD, NOT AN IDENTITY"), "{why}");
+}
+
 /// Line 4 is a pact 0.10.7 row: no chain at all, so it reaches the ladder.
 ///
 /// The sentence it falls through with has to say the row is **old**, not that
