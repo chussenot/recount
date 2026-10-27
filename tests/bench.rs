@@ -107,12 +107,16 @@ use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 /// synthetic byte is *more* expensive than a real one: 171 MB of real
 /// transcript scans in 2.32 s where 193 MB of this scans in 2.83 s, because a
 /// real file spends much of its size on records and blocks that never become
-/// searchable turn text. Read the synthetic number as the pessimistic one.
+/// searchable turn text. On that code, the synthetic number was the
+/// pessimistic one.
 ///
-/// (Those four figures are pre-recount-hwk.47 and all of them are lower today.
-/// They are kept because what they establish is the *ratios* — record size
-/// barely matters, a real byte is cheaper than a synthetic one — and the
-/// calibration they justify has not changed.)
+/// (Those four figures are pre-recount-hwk.47 and all of them are lower today,
+/// and only one of the two ratios survived. Record size still barely matters.
+/// The other has inverted: after hwk.47 the synthetic grep reads 193 MB in
+/// ~0.94 s while a real 173 MB corpus takes ~1.8 s (docs/performance.md), so a
+/// real byte now costs roughly twice a synthetic one. Read the synthetic number
+/// as the OPTIMISTIC one today — the real-corpus run in docs/performance.md is
+/// the figure to hold against the spec's 2 s.)
 const SESSIONS: usize = 500;
 const TURNS_PER_SESSION: usize = 40;
 const BODY_BYTES: usize = 10_000;

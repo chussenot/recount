@@ -106,7 +106,7 @@ jobs:
           CARGO_VERSION="${out#version = \"}"
           CARGO_VERSION="${CARGO_VERSION%\"}"
           if [ "$CARGO_VERSION" != "$TAG" ]; then
-            echo "::error::Cargo.toml says $CARGO_VERSION but the tag is $TAG. A tag that disagrees with the manifest ships a binary whose --version lies. Bump with \`cog bump\`, which moves the manifest, the lockfile and CHANGELOG.md together."
+            echo "::error::Cargo.toml says $CARGO_VERSION but the tag is $TAG. A tag that disagrees with the manifest ships a binary whose --version lies. Set the version in Cargo.toml and Cargo.lock in the bump commit: cog.toml declares no pre_bump_hooks, so \`cog bump\` writes CHANGELOG.md and the tag but not the manifest."
             exit 1
           fi
           echo "Cargo.toml: $CARGO_VERSION"
@@ -306,15 +306,24 @@ jobs:
             exit 1
           }
 
-          # Every command the CLI reference documents, read out of --help rather
-          # than hardcoded here: a hardcoded list is the same drift
-          # scripts/check-docs.sh exists to prevent, one level down.
-          for c in sessions at grep explain doctor completion; do
+          # Every command the CLI reference documents, read out of docs/cli.md's
+          # `### \`recount <cmd>\`` headings rather than hardcoded here: a
+          # hardcoded list is the same drift scripts/check-docs.sh exists to
+          # prevent, one level down. It was hardcoded, and it missed `testify`
+          # for the whole of 0.2.0.
+          documented="$(awk '/^## Commands$/{f=1;next} /^## /{f=0} f' docs/cli.md \
+            | sed -nE 's/^### `recount ([a-z]+)`.*/\1/p')"
+          [ -n "$documented" ] || {
+            echo "::error::found no \`### recount <cmd>\` headings in docs/cli.md's Commands block"
+            exit 1
+          }
+          for c in $documented; do
             "$BIN" --help | grep -qE "^[[:space:]]+$c[[:space:]]" || {
               echo "::error::the $c subcommand is missing from the release binary"
               exit 1
             }
           done
+          echo "documented commands present: $(echo $documented)"
 
           # doctor is the command that must work when nothing else does, and it
           # exits 0 on every input by contract (docs/cli.md). Running it in an

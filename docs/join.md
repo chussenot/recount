@@ -184,13 +184,34 @@ environment carrying the parent's uuid and nothing of its own — and takes
 `harness_subagent` only from a declared `PACT_HARNESS_SUBAGENT`. So a subagent
 that skipped the self-id recipe writes a row shaped exactly like the
 orchestrator's, and the keyed tier answers it with the **parent's** top-level
-transcript: tier `keyed`, no score, not a lead, exit 0, and an evidence line
-saying the writer "is nobody's subagent". The row's `agent` field is the only
-thing that could contradict it, and the keyed tier never reads it. This page
-has no measured case — at `6975d07` the 36 session-only rows are 35
-`orchestrator` and one `precheck` — so it is a hole in what the row can say,
-not an observed miss. When it does happen, the answer is wrong with the
-authority of an identity.
+transcript.
+
+Until 0.2.x this was answered as an identity — tier `keyed`, no score, not a
+lead, exit 0, and an evidence line saying the writer "is nobody's subagent" —
+because the keyed tier never read the row's `agent` field. **Now `explain` and
+`testify` ask the ledger who else wrote session-only rows under the same
+session** (`Events::session_only_agents`). One name is consistent with an
+identity, and nothing changes. Two or more mean the ledger has attributed one
+top-level transcript to several agents, and one transcript ran one agent — the
+rule `sessions` already applied from the transcript's side. The answer stays
+keyed (same file, still no score: nothing was inferred, and the ladder would
+only swap a pointer to the right session for a tie broken by path order), but it
+is a **lead**: `confident: false`, exit 1, transcript withheld, and the `keyed`
+evidence line names the agents.
+
+This repository's own ledger trips it. At `6975d07` its 36 session-only rows are
+35 `orchestrator` and one `precheck` (line 178, a `context` row setting
+`precheck=v0.2.0-preflight`), all under one session. That row was most likely
+the orchestrator acting under a second name rather than a subagent — but the row
+cannot say which, and so every one of the 36 now answers as a lead pointing at
+the orchestrator's transcript. The cost is deliberate: an identity the ledger
+contradicts is not one.
+
+What it still cannot catch: a subagent that skips self-id in a session whose
+parent never writes a session-only row of its own. Then the ledger names one
+agent for the session, that agent is the subagent, and the answer is the
+parent's transcript with the authority of an identity. Only the self-id recipe
+closes that.
 
 ## The key is topological
 
@@ -607,7 +628,10 @@ The keyed tier is untouched by all of this, and was verified so:
 `explain --event-line 207` (subagent-keyed) and `--event-line 216`
 (parent-keyed) on this repo produce byte-identical output before and after. The
 keyed tier never consulted the ladder, has no candidate set and no tie for a
-mention to break, so `lead` is `false` on it by construction.
+mention to break, so the lead *rule* never touches it. (A keyed answer can be a
+lead for a different reason since — a session the ledger attributes to two
+agents; see [What the keyed tier does not fix](#what-the-keyed-tier-does-not-fix).
+On this ledger that now includes line 216.)
 
 [worked-example.md](worked-example.md) replays one such case end to end, with
 the full terminal output and with the refusals analysed. Its distribution

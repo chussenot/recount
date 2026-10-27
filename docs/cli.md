@@ -143,7 +143,10 @@ written on another machine.
 and what fell short was either the arithmetic or the chain itself — a *lead*,
 where the chain could not tell this session from its siblings and only the
 transcript mention picked it out, so no score it reaches counts (see `lead`
-under [JSON shapes](#at-and-explain)). Either way that evidence is what tells an
+under [JSON shapes](#at-and-explain)). A keyed answer can be a lead too, from
+`explain` or `testify`: the event named a top-level transcript, but the ledger
+records more than one agent writing session-only rows under that session, so
+the file is the session's and may not be this agent's. Either way that evidence is what tells an
 auditor where to look next. It withholds the *transcript* on purpose too —
 under a topology where every session in the repo overlaps every moment, a
 non-confident candidate's transcript is *a* transcript, not *the* one, and
@@ -297,7 +300,12 @@ schematic:
 
 A check pact adds tomorrow is testified without a change to recount. A bare
 JSON array is read as a findings list too, which is what `jq '.stale_holds'`
-hands over.
+hands over, under the check name `"findings"`. So is a single finding object —
+what `jq '.stale_holds[0]'` hands over — under `"finding"`. An object counts as
+one finding when it carries an agent and a moment, or when it holds no array at
+all; otherwise it is an audit document and its arrays are the checks. (Before
+this was written down, a single finding object read as an empty audit and exited
+0.)
 
 `opened_at` beats `closed_at` deliberately: the moment worth reading a
 transcript around is when the agent *took* the lease, not when the sweep closed
@@ -318,7 +326,8 @@ is reported as unanswered.
 | 1 | some finding had an agent and a moment and still got no confident match. `untestified` lists exactly which, and why, on both streams |
 
 Malformed input is neither: it is a hard error, one sentence on stderr and no
-document at all.
+document at all. That includes JSON that cannot hold a finding — a number, a
+string, a boolean, `null` — which used to read as a clean audit and exit 0.
 
 A candidate that is not confident — below the bar, or a lead — counts as
 untestified and is printed with its evidence and **without** its transcript,
@@ -422,7 +431,7 @@ never absent.
             "tier": "keyed" | "topological",
             "confidence": 0.95,             // null when "tier" is "keyed"
             "confident": true,
-            "lead": false,                  // true = the chain did not discriminate: never confident
+            "lead": false,                  // true = nothing structural picked it out: never confident
             "evidence": [ { "signal": "keyed" | "topology" | "time_overlap"
                                     | "transcript_mention", "detail": "…" }, … ],
             "transcript": [ { "ts": …, "role": …, "text": …, "line": … }, … ] },
@@ -448,6 +457,15 @@ that way is an answer. The score is still computed and still printed; the
 digest's verdict reads `LEAD — NOT CONFIDENT` and the topology evidence line
 says why in words. See [join.md](join.md) for the measurement behind the rule.
 Branch on `confident`; `lead` tells you *which* of the two ways it failed.
+
+A **keyed** answer is a lead in one case: the event is session-only (a
+`harness_session`, no `harness_subagent`) and the ledger records more than one
+agent writing session-only rows under that session. `tier` stays `"keyed"` and
+`confidence` stays `null` — nothing was inferred — but `confident` is false, the
+exit is 1, the transcript is withheld, and the `keyed` evidence line names the
+agents. A subagent inherits its parent's session id, so a subagent that never
+resolved its own transcript id writes a row exactly like its parent's; see
+[limitations.md](limitations.md#a-keyed-answer-is-only-as-honest-as-the-row-that-named-it).
 
 `model_check` is null, and the digest silent, whenever either side is missing or
 `confident` is false. Never an error: a comparison that cannot be made is not a
@@ -489,7 +507,7 @@ failed comparison.
               "untestified": 1,             // had an agent and a moment, got no confident match
               "passed_through": 0 },        // had neither; not a failure
   "findings": [ {
-      "check": "stale_holds",               // the array it came out of; "findings" for a bare array
+      "check": "stale_holds",               // the array it came out of; "findings" for a bare array, "finding" for one object
       "index": 0,
       "agent": <name|null>,                 // null on a pass-through
       "ts": <rfc3339|null>,
@@ -500,7 +518,7 @@ failed comparison.
           "tier": "keyed" | "topological",
           "confidence": null,               // null when "tier" is "keyed"
           "confident": true,
-          "lead": false,                    // true = the chain did not discriminate: never confident
+          "lead": false,                    // true = nothing structural picked it out: never confident
           "evidence": [ { "signal": …, "detail": "…" }, … ],
           "window": { "since": …, "until": … },
           "transcript": [ { "ts": …, "role": …, "text": …, "line": … }, … ] },
