@@ -1,8 +1,9 @@
 # Installing recount
 
 There is no package in any registry. Each GitHub release carries prebuilt
-binaries for three targets — see [Prebuilt binaries](#prebuilt-binaries) —
-and everywhere else recount builds from source. It is a single Rust binary with
+binaries for three targets — see [Prebuilt binaries](#prebuilt-binaries),
+which [mise](#through-mise) installs in one command — and everywhere else
+recount builds from source. It is a single Rust binary with
 no runtime state, no config file and no network access, so building it is the
 whole installation.
 
@@ -35,7 +36,8 @@ verdict is `.join_readiness.ready` under `--json`. See
 
 ## With mise
 
-`mise install` brings in the Rust toolchain and [mbx](https://mr-boxington.jdx.dev),
+This section is about building from source; for the prebuilt binary, see
+[Through mise](#through-mise). `mise install` brings in the Rust toolchain and [mbx](https://mr-boxington.jdx.dev),
 the build cache every Cargo command run through mise goes through —
 [development.md](development.md#the-build-cache) explains what that changes and
 the one thing to know about it. `mise tasks` lists the tasks. The two that
@@ -123,6 +125,42 @@ gh attestation verify recount-<tag>-<triple>.tar.gz --repo <owner>/recount
 **Intel macOS and Windows have no binary.** Intel macOS because GitHub retired
 the runner image and cross-compiling would ship a binary nobody executed;
 Windows for the reason below. Both build from source.
+
+### Through mise
+
+mise's GitHub backend reads those releases directly, so on the three targets
+above the binary is one command, with no Rust toolchain involved:
+
+```bash
+mise use -g github:chussenot/recount@latest   # or @0.2.0 to pin
+recount --version
+```
+
+mise picks the tarball for the machine's target from the release's asset
+names and finds the binary inside the tarball's top-level directory, so the
+asset naming above is what this depends on: `recount-<tag>-<triple>.tar.gz`,
+with the bare `X.Y.Z` tag. Changing either breaks every `mise use` already in
+someone's config. To pin it for a repository rather than a machine, put the
+same line in that repository's `mise.toml`:
+
+```toml
+[tools]
+"github:chussenot/recount" = "0.2.0"
+```
+
+Pin a version rather than `latest` there: a pact audit read through recount
+is only as stable as the recount that joined it. Where `api.github.com` is
+out of reach, mise's GitHub backend cannot list versions. In a sandbox that
+answers it only for some repositories, for instance, use mise's `http:`
+backend on the release URL, with the checksum from `SHA256SUMS`:
+
+```toml
+[tools]
+"http:recount" = { version = "0.2.0", url = "https://github.com/chussenot/recount/releases/download/0.2.0/recount-0.2.0-x86_64-unknown-linux-musl.tar.gz", checksum = "sha256:ffe7883c1ae928a0625d5d41135144a67f44ccf15c7a539db4e0e9280a889e60" }
+```
+
+`mise run install` ([With mise](#with-mise)) is something else: it builds
+this checkout from source.
 
 ## What is not promised
 

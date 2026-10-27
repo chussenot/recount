@@ -349,7 +349,10 @@ jobs:
         run: |
           set -euo pipefail
           # `recount-<tag>-<triple>` is the shape every tool manager expects
-          # (cf. ripgrep, bat).
+          # (cf. ripgrep, bat). It is also a contract now: `mise use
+          # github:chussenot/recount` picks the asset by this name, so renaming
+          # it breaks every install already pinned in someone's mise.toml
+          # (docs/install.md, "Through mise").
           NAME="recount-$TAG-${{ matrix.target.triple }}"
           mkdir -p "dist/$NAME"
           cp "target/${{ matrix.target.triple }}/release/recount" "dist/$NAME/"
