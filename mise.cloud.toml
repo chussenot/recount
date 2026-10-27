@@ -1,0 +1,14 @@
+# Loaded on top of mise.toml when MISE_ENV=cloud, which
+# .claude/hooks/session-start.sh sets for a Claude Code cloud session.
+#
+# The cloud sandbox answers api.github.com only for this repository, so mise
+# cannot list versions for the tools mise.toml names — `mise install` fails on
+# mr-boxington, and on rust's channel lookup. Direct release downloads work, so
+# mbx comes from its pinned release URL instead, at the version mise.toml pins
+# (move the two together). Rust stays rustup's, which the image ships; the
+# `[wrappers.cargo]` in mise.toml applies to it all the same.
+[settings]
+disable_tools = ["rust", "mr-boxington"]
+
+[tools]
+"http:mbx" = { version = "1.28.0", url = "https://github.com/jdx/mr-boxington/releases/download/v1.28.0/mbx-x86_64-unknown-linux-gnu.tar.gz" }

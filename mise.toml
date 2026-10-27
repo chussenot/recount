@@ -1,5 +1,36 @@
+# [wrappers.cargo] below, the mbx build cache's hook into Cargo, needs this mise.
+min_version = "2026.8.16"
+
 [tools]
 rust = "latest"
+# mr boxington (mbx): a shared build cache for Cargo. It restores matching
+# compiler outputs from one store under ~/.cache/mbx and compiles the rest, so
+# a second worktree, a fresh clone or a `cargo clean` starts warm instead of
+# cold — and a pact fleet is many worktrees of one repository, every one of them
+# compiling the same dependency graph. https://mr-boxington.jdx.dev
+#
+# Pinned, not `latest`: `[wrappers.cargo]` below routes every Cargo command
+# through it, so a release that changes behaviour should arrive in a commit,
+# not in a `mise install`. mise.cloud.toml carries the same version as a
+# release URL; move the two together.
+mr-boxington = "1.28.0"
+
+# Every Cargo command mise runs — `mise run <task>`, `mise exec -- cargo …`, or
+# plain `cargo` in a shell with mise activated — goes through mbx. This is what
+# `mbx setup --local` writes. It is preferred to the rust tool's
+# `mr_boxington = true` option because it does not depend on mise managing
+# Rust: a cloud session's Rust is rustup's (mise.cloud.toml), and the option
+# would silently stop wrapping there.
+#
+# THE ONE THING TO KNOW: after the first wrapped build, `target` is a symlink
+# into mbx's store, and restored artifacts are read-only hard links. A Cargo
+# that bypasses mbx (`~/.cargo/bin/cargo` with no mise activation, an IDE with
+# its own PATH) cannot overwrite them and fails with "output file … is not
+# writeable". Use `mise exec -- cargo …`, activate mise, or put mbx's Cargo
+# shim first on PATH (`mbx setup`); docs/development.md has the details.
+[wrappers.cargo]
+command = "mbx"
+env = { MBX_CARGO_SHIM_MODE = "1" }
 
 # recount has NO cargo features, deliberately — docs/spec.md refuses a TUI, a
 # daemon, network, embeddings and persistence, so there is nothing to gate. That
@@ -98,6 +129,19 @@ run = [
   "mise run lint-lines",
   "mise run check-docs",
 ]
+
+[tasks.clean]
+description = "Remove this checkout's build output, including its managed target in mbx; the shared cache stays"
+# Both, because `cargo clean` alone is not a clean under mbx: `target` is a
+# symlink into mbx's store, `cargo clean` removes the link, and the next build
+# relinks the same managed target and finishes in a tenth of a second. `mbx
+# clean` removes the managed target itself. The shared store — what makes the
+# NEXT worktree warm — is untouched; `mbx gc` is how that shrinks.
+run = ["cargo clean", "mbx clean"]
+
+[tasks.cache]
+description = "What the mbx build cache saved, and what it holds"
+run = ["mbx stats", "mbx cache stats"]
 
 [tasks.install]
 description = "Build and install the recount binary onto PATH, and refresh shell completions"
