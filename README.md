@@ -52,15 +52,18 @@ a coincidence of text. Reaching for the coincidence first is how you match the
 wrong session confidently. And where the ledger can *name* the transcript
 outright — pact stamps the harness session on the events it writes — recount
 takes that name and scores nothing at all, because an identity read off the
-record is not a guess. [docs/join.md](docs/join.md) has both tiers and the full
+record is not a guess. Unless the record contradicts itself: a ledger that
+names two agents for one session has not said whose it is, and recount reports
+that answer as a lead. [docs/join.md](docs/join.md) has both tiers and the full
 ladder.
 
-### Every answer carries a confidence and its evidence, because the failure being prevented is a confident wrong one
+### Every answer carries its evidence, because the failure is a confident wrong one
 
 recount could return the best-matching session and nothing else. It never does.
-Every result reports what it scored and *which signals produced that score* —
-and every refusal reports which of its two reasons applies, so "no transcript"
-and "no overlap in time" can never be confused for one another.
+Every result reports *which signals produced it* — a score as well, when the
+answer was inferred rather than read off the record — and every refusal names
+its reason, so "no transcript" and "no overlap in time" can never be confused
+for one another.
 
 This is not a UI preference. A tool built because an audit believed something
 false must not be able to hand you a false belief with a clean face. The number

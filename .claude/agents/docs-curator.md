@@ -78,6 +78,7 @@ badly.
 | `docs/performance.md` | the mtime prune, the two ceilings, measured numbers, the sidecar deferral |
 | `docs/development.md` | build, test, the gates and why each exists, the agents |
 | `docs/worked-example.md` | one real finding replayed end to end, including the tool being wrong |
+| `docs/troubleshooting.md` | every message a user can hit — `doctor` findings, refusals, input and build errors — with its cause and fix, quoted from the code |
 | `docs/session-learnings.md` | a dated study of four other repositories' ledgers, and what recount got wrong on them |
 
 New material goes in the page that already owns that surface. Create a new page

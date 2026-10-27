@@ -3,10 +3,10 @@
 **Observed: 2026-08-19, in two passes.** Machine: this one — Linux 6.17
 (Ubuntu OEM kernel), `/home/chussenot`, running the `recount` repo itself.
 
-* **Pass A — 2026-08-19 ~07:20 local (wave 0).** The survey this document was
+- **Pass A — 2026-08-19 ~07:20 local (wave 0).** The survey this document was
   written from: 871 `.jsonl` files, 169,775 lines. Every unqualified number
   below is from pass A.
-* **Pass B — 2026-08-19 ~10:05 local (wave 3).** A re-measurement taken while
+- **Pass B — 2026-08-19 ~10:05 local (wave 3).** A re-measurement taken while
   reconciling these notes against the shipped `claude_code` connector and
   `recount doctor`. Where B disagrees with A the text says so and dates both.
   §0 carries the full diff; §5 carries the one that mattered.
@@ -97,7 +97,7 @@ Consequences, and they are the point of measuring twice:
 
 ### 0.1 Directory layout, actual
 
-```
+```text
 ~/.claude/projects/
   -home-chussenot-Documents-pact/                      # encoded project path
     416610a6-0d95-4ddf-8c70-7915d9c4ff33.jsonl         # a session (238 of these)
@@ -155,7 +155,7 @@ read a `cwd` from, and 2 are worktree dirs whose files only ever record the
 The `--claude-worktrees-` infix that identifies a Claude-Code worktree
 directory is just `/` + `.claude` → `-` + `-claude`. There is no special-casing.
 
-### 1.3 THE ENCODING IS LOSSY. This is the most important fact in this document.
+### 1.3 THE ENCODING IS LOSSY. This is the most important fact in this document
 
 `/`, `.`, `_`, `+`, and a literal `-` **all encode to the same `-`** and are
 indistinguishable in the encoded form. Confirmed on this machine for `/`, `.`,
@@ -657,6 +657,7 @@ next day appends lines that follow older ones physically but not
 chronologically.
 
 Consequences for `recount at --ts … --window 5m`:
+
 - **Do not binary-search a file by timestamp.** Scan it.
 - **Do not stop early** on "we're past the window" — a later line can be
   earlier. Read the whole file (after mtime pruning) or accept misses.
@@ -1011,7 +1012,7 @@ Two traps, both real:
 
 Both agents arrived at this independently, and it is not optional.
 
-```
+```text
 matches == 1  → export the id read from that file's `agentId`
 matches != 1  → leave it UNSET; the orchestrator's post-hoc mapping owns it
 ```
@@ -1101,7 +1102,7 @@ the table under it was wrong. Every subagent has a sidecar either way.
 
 A pact 0.11.0 event carrying both ids names a file exactly, with no search:
 
-```
+```text
 <projects_root>/<encode(cwd)>/<harness_session>/subagents/agent-<harness_subagent>.jsonl
 <projects_root>/<encode(cwd)>/<harness_session>.jsonl          # subagent absent: the parent
 ```
@@ -1167,7 +1168,7 @@ a bare slug, the same shape a `PACT_MODEL` value has:
 `<synthetic>`; the other **10 switch between two real models mid-transcript**,
 and 3 of the 10 are subagent files:
 
-```
+```text
 claude-fable-5  → claude-opus-4-8   agent-a1ee33ec9b9940ef3.jsonl   (subagent)
 claude-fable-5  → claude-opus-4-8   agent-a42e589595a0f091f.jsonl   (subagent)
 claude-fable-5  → claude-opus-4-8   agent-a06d4cc03eaabbc8d.jsonl   (subagent)

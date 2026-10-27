@@ -87,8 +87,10 @@ wrong and how its output shows it.
 
 ## Where next
 
-- **Looking up a flag, an exit code or a JSON field** → [cli.md](cli.md)
-- **An answer surprised you** → [join.md](join.md), then
-  [limitations.md](limitations.md)
-- **A real case, end to end** → [worked-example.md](worked-example.md)
-- **Everything else** → the [documentation index](README.md)
+| If you are | Read |
+|---|---|
+| Looking up a flag, an exit code or a JSON field | [cli.md](cli.md) |
+| Looking at an error or a refusal | [troubleshooting.md](troubleshooting.md) |
+| Surprised by an answer | [join.md](join.md), then [limitations.md](limitations.md) |
+| After a real case, end to end | [worked-example.md](worked-example.md) |
+| After anything else | the [documentation index](README.md) |

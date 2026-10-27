@@ -187,6 +187,22 @@ It is a real gate: `mise run check` runs it through `mise run check-docs`,
 and CI runs it after `cargo test`, which has already built the binary it
 reads.
 
+**`scripts/release-notes.sh`** — prints one version's section of
+`CHANGELOG.md`, for `gh release create --notes-file`. The release workflow
+calls it twice: in `integrity`, where an empty section fails the tag before
+anything is built, and in `publish`, for the notes themselves. It exists
+because `--generate-notes` would list merged pull requests, which here are
+merge commits made by an orchestrator, while the changelog `cog` writes is
+grouped by commit type and carries the scope. `--self-test` checks the
+extraction against a synthetic changelog covering the cases that broke: a
+middle, newest and oldest section, and a version that is a prefix of another
+(`0.1.0` against `0.1.0-rc1`).
+
+```bash
+./scripts/release-notes.sh --self-test
+./scripts/release-notes.sh 0.2.0
+```
+
 ## Test layout
 
 At 0.2.0, `cargo test` runs 156 unit tests, 10 degradation tests, 3 fixture

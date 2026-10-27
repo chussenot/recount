@@ -43,7 +43,7 @@ description = "Build the recount binary"
 run = "cargo build"
 
 [tasks.test]
-description = "Run the whole suite: unit, degradation, fixture (benches are ignored here — see `bench`)"
+description = "Run the whole suite: unit, degradation, fixture, keyed (benches are ignored here — see `bench`)"
 # One leg, because there is one build. The benches live in tests/bench.rs behind
 # #[ignore] and are NOT run here: they generate a ~193 MB synthetic corpus and
 # take minutes, and they refuse to assert under debug_assertions anyway (a debug
@@ -52,7 +52,7 @@ description = "Run the whole suite: unit, degradation, fixture (benches are igno
 run = "cargo test"
 
 [tasks.bench]
-description = "Measure the two ceilings docs/spec.md sets (release, ~193 MB corpus, minutes)"
+description = "Measure the two ceilings docs/spec.md sets, and the keyed one (release, ~193 MB corpus, minutes)"
 # Release is not optional and the task encodes it rather than trusting a human to
 # remember: tests/bench.rs refuses to assert under debug_assertions, and the same
 # grep measured 35.9 s in debug versus 2.83 s in release (tests/bench.rs).
@@ -112,7 +112,7 @@ run = [
 ]
 
 [tasks.check]
-description = "Run the full CI check locally, serially, as CI does: fmt, lint, test, line length"
+description = "Run the full CI check locally, serially, as CI does: fmt, lint, test, line length, docs"
 # Sequential, and that is not a preference. `depends` runs tasks in PARALLEL, and
 # these legs all reach the binary through the single path `target/debug/recount`.
 # The integration tests spawn it via env!("CARGO_BIN_EXE_recount"), so a parallel

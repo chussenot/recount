@@ -54,11 +54,13 @@ and every other command is a prefix of it.
    the second's results, so no transcript is reported twice.
 5. **Join.** `join::resolve` takes the query, the worktrees and the discovered
    sessions. If the event names its transcript (`harness_subagent` or
-   `harness_session`), the keyed tier returns that identity with no score.
-   Otherwise the topological tier filters by worktree, gates on time overlap,
-   breaks ties on transcript mentions, and returns a scored match with its
-   evidence — or a refusal naming one of its two reasons. Transcripts are read
-   lazily, only for candidates that survive topology.
+   `harness_session`), the keyed tier returns that identity with no score — as a
+   lead instead when the row is session-only and the ledger records more than
+   one agent writing under that session (`Events::session_only_agents`, read by
+   `explain` and `testify`). Otherwise the topological tier filters by worktree,
+   gates on time overlap, breaks ties on transcript mentions, and returns a
+   scored match with its evidence — or a refusal naming its reason. Transcripts
+   are read lazily, only for candidates that survive topology.
 6. **Explain a topology refusal honestly.** If the cheap, windowed pass refused
    on topology, `at` repeats the scan unwindowed, because the prune may have
    removed exactly the sessions a "no overlap" refusal would have cited. A match

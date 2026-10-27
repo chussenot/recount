@@ -33,7 +33,7 @@ sentence.
 
 **Not one of those 2,456 rows carries an attribution chain.**
 
-```
+```console
 $ jq -r 'select(.harness_session!=null)|1' <repo>/.pact/events.jsonl | wc -l
 pact 0 · millrace 0 · quern 0 · arkanoid 0        (recount's own ledger: 101 of 278)
 ```
@@ -159,7 +159,7 @@ the annex versions and their timestamps come from git, not from inference.
 
 ---
 
-## 2. Parking is not death. It is indefinite suspension with a human wake-up.
+## 2. Parking is not death. It is indefinite suspension with a human wake-up
 
 This is the finding I did not expect and it reframes every stale-hold in the
 millrace ledger.
@@ -386,14 +386,14 @@ back to sluicegate after a lease-bookkeeping race".
 
 ---
 
-## 5. The transcripts existed. recount could not see them.
+## 5. The transcripts existed. recount could not see them
 
 ### What SHOWS
 
 `recount testify --repo /home/chussenot/Documents/millrace` **refuses 57 of
 the 65 millrace findings**, every one with the same structural reason:
 
-```
+```text
   no confident match — reason: no overlap
     96 session(s) matched no invoked_from and no worktree named after agent
     `tailrace` (known: `main`); candidates are every session in the repo, but
@@ -404,7 +404,7 @@ the 65 millrace findings**, every one with the same structural reason:
 under `-home-chussenot-Documents-millrace` is dated 2026-08-16. The 08-15
 transcripts are not deleted. They are here:
 
-```
+```text
 /home/chussenot/.claude/projects/-home-chussenot-Documents-treadle/
   2eaec220-d67f-4470-918d-316d85e5b9f4/subagents/agent-*.jsonl   (19 files)
 ```
@@ -417,7 +417,7 @@ first act. The parent Claude Code process was launched from
 files a session by the cwd at launch. Point recount at treadle and the join
 works:
 
-```
+```console
 $ recount at --repo /home/chussenot/Documents/treadle --agent tailrace --ts 2026-08-15T21:09:25Z
   match  …/-home-chussenot-Documents-treadle/2eaec220-…/subagents/agent-a065464fe9fc00c7d.jsonl
     tier topological · confidence 0.65 · threshold 0.50 · CONFIDENT
@@ -525,7 +525,7 @@ bounds of the file.
 
 Reproduced above in §5:
 
-```
+```text
     tier topological · confidence 0.65 · threshold 0.50 · CONFIDENT
       · time overlap: session covers 2026-08-15T20:22:44Z..2026-08-16T06:32:03Z
         and overlaps the queried 2026-08-15T21:04:25Z..2026-08-15T21:14:25Z
@@ -598,9 +598,11 @@ Absence of testimony is a result, so here it is quantified.
 - **Reasoning is not in the transcripts.** Every extended-thinking block in
   every session read for this document stores `"thinking": ""` with only a
   signature:
+
   ```json
   [{"type":"thinking","thinking":"","signature":"Eu0FCokBCBAYAipAmcOb…"}]
   ```
+
   recount prints these as `[thinking]` turns with no body, correctly. So
   "did the agent *reason* about X?" is answerable only when the agent said so
   in visible text. Every quote in §1–§4 is visible assistant text or a tool
